@@ -14,8 +14,11 @@ static void show_mhz(unsigned row, unsigned mhz) {
 }
 
 int app_main(unsigned lsb_mhz) {
+    app_log("hello on board %d", APP_BOARD);
     board_init(APP_BOARD == 2);
-    if (display_init(APP_BOARD)) {
+    bool screen = display_init(APP_BOARD);
+    app_log("screen %s", screen ? "found":"not found");
+    if (screen) {
         for (unsigned row = 0; row < 15; ++row)
             display_text(row, WHITE, "");
         display_text(1, GREEN, "HELLO FROM RAM");
@@ -26,8 +29,10 @@ int app_main(unsigned lsb_mhz) {
     }
     while (board_keys())
         hal_delay_us(1000);
-    for (unsigned ms = 0; ms < WAIT_MS && !board_keys(); ++ms)
+    unsigned ms = 0;
+    for (; ms < WAIT_MS && !board_keys(); ++ms)
         hal_delay_us(1000);
+    app_log(ms < WAIT_MS ? "a key after %u ms":"no key in %u ms", ms);
     board_restore();
     return 0;
 }

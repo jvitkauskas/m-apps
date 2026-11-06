@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: MIT */
-/* An app's slot: m-bootloader's docs/SPEC.md §11.8. */
+/* An app's slot: m-bootloader's docs/SPEC.md §11.8, without its top 0xd80 bytes, which hold the log (kit/log.h). */
 ENTRY(app_entry)
-MEMORY { slot (rwx) : ORIGIN = 0x1c30000, LENGTH = 0x4fd80 }
+MEMORY { slot (rwx) : ORIGIN = 0x1c30000, LENGTH = 0x4f000 }
 SECTIONS {
     .text ORIGIN(slot) : {
         KEEP(*(.entry))

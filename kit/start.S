@@ -29,3 +29,10 @@ app_entry:
 .balign 4
 app_caller_stacks:
     .long 0, 0
+/* Vector 1, the CPU exception, while the guard is on (kit/app.c). */
+.section .text.app_crash_entry,"ax",@progbits
+.global app_crash_entry
+.type app_crash_entry,@function
+app_crash_entry:
+    goto app_crash
+.size app_crash_entry,.-app_crash_entry
