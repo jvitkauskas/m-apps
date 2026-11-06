@@ -53,7 +53,7 @@ The route doesn't matter, because every route ends the same way:
 |---|---|---|
 | Returns, started by `run-ram` | Resets into download mode | `make run` reads it |
 | Returns, started over MIDI or from the card | Goes back to what started it | `make log BOARD=fm1` |
-| Crashes | Shows `APP CRASHED` for 8 seconds, then resets into download mode | `make log BOARD=fm1` |
+| Crashes | Shows `APP CRASHED`, then resets into download mode after 8 seconds. The FM-1's screen goes blank then, and the SMK-37's keeps the message | `make log BOARD=fm1` |
 | Hangs | The watchdog resets it into download mode after 32 seconds | `make log BOARD=fm1` |
 
 `make log` asks a running unit to go to download mode, then uses `build/<board>/logread.bin` to read the log. If the unit is already in download mode, it just reads. **Switching the unit off loses the log,** and starting firmware probably does too.
