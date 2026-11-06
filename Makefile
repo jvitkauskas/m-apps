@@ -12,7 +12,7 @@ CFLAGS := -target pi32v2 -mcpu=r3 -std=c99 -Oz -ffreestanding -fno-builtin -fno-
 	-Wall -Wextra -Werror -flto -DRAM_STAGE -Ikit -I$(MB)/include
 # The drivers apps get from m-bootloader. --gc-sections drops what an app doesn't use.
 DRIVERS := core platform display board runtime usb_midi
-APPS := hello crashtest hangtest
+APPS := hello crashtest hangtest usbdisk
 # A stack for each app's C code. An app can override it: <name>_STACK := 0x8000
 APP_STACK_DEFAULT := 0x4000
 
@@ -59,7 +59,7 @@ $(eval $(call BOARD_template,smk37,-DBOARD_SMK,2))
 
 # app, board, its -D flag, its number, its name for the trailer
 define APP_template
-build/$(2)/$(1)/%.o: apps/$(1)/%.c kit/app.h kit/log.h Makefile
+build/$(2)/$(1)/%.o: apps/$(1)/%.c $$(wildcard apps/$(1)/*.h) kit/app.h kit/log.h Makefile
 	@mkdir -p $$(@D)
 	$(CLANG) $(CFLAGS) $(3) -DAPP_BOARD=$(4) -c $$< -o $$@
 build/$(2)/$(1)/app.ld: kit/app.ld.S Makefile

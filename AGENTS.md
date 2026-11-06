@@ -70,6 +70,8 @@ These were all seen on real units unless they say otherwise.
 - **`.bss` is cleared each time,** but only because the kit does it. `.data` holds what the last run left, unless the file was loaded again.
 - **WiFi transmit DMA needs RAM below `0x01C20000`,** according to notes in other firmware projects. We haven't tested that here.
 - **The FM-1's SD card shares SPI1 with the screen** (SPEC §11.5). Close one before using the other.
+- **SD cards have firmware quirks,** so handle an unexpected answer by restarting the card and retrying. One 32 GB card rejected a read of its last sector when it was reached by sequential reads a few ms apart, and then answered "illegal command" to everything until restarted, which took two attempts. A different card didn't do this. `apps/usbdisk/card.c` handles it.
+- **A card keeps its state through a soft reset,** because its power stays on. An app that leaves one stuck can make the bootloader's `SD CARD` item disappear until the unit is switched off and on. It also keeps CRC mode on, which the bootloader can't work with, so turn that off before leaving, as `card_finish()` does.
 
 ## What needs a person
 
