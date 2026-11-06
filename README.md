@@ -89,6 +89,20 @@ int app_main(unsigned lsb_mhz) {
 - `APP_BOARD` is 1 on the FM-1 and 2 on the SMK-37, and each board gets its own build.
 - An app needing a larger stack sets `<name>_STACK := 0x8000` in the `Makefile`. The default is 16 KiB.
 
+## Apps
+
+### usbdisk
+
+Shows the FM-1's SD card to the computer as a USB disk, so files can be copied without taking the card out. It needs the card mod, and on the SMK-37 it only says there's no card.
+
+```sh
+make run APP=usbdisk BOARD=fm1 RUN_FLAGS="--timeout 3600" M_FLASHER="sudo m-flasher"
+```
+
+**To leave,** eject the disk on the computer, which is the way to use normally, or press PLAY, which doesn't wait for the computer to finish, so eject first if you can. With no computer attached, it also leaves after 2 minutes. It doesn't leave just because the disk is idle, as a computer can hold writes back for a while.
+
+A write has reached the card before the computer is told it succeeded, and data is checked by CRC in both directions. It's a simple driver for now, at about 270 KB/s reading and 220 KB/s writing started over MIDI, and a little slower from `run-ram`. So it suits small files, not filling a card.
+
 ## License
 
 MIT, as m-bootloader is. See [LICENSE](LICENSE).
