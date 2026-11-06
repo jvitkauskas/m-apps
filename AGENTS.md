@@ -79,6 +79,10 @@ These were all seen on real units unless they say otherwise.
 
 **One user of a unit at a time.** Check with anyone else who might be using it before you start. `m-flasher find` shows the unit's state. Leave it on its firmware when you finish, which `make run` does by default.
 
+## Testing without anyone at the keys
+
+Over MIDI, a unit can be in the bootloader's MIDI mode or its SD card item with nobody pressing anything, if it has a test build of m-bootloader. [SPEC §11.9](https://github.com/jvitkauskas/m-bootloader/blob/main/docs/SPEC.md) covers building and using one. A requested SD card run ends in download mode, so read what it left in RAM from there. Without a test build, those two routes need a person at the keys, and `make run` still works.
+
 ## Seeing the screen with a camera
 
 If a camera is pointed at the unit, you can check the screen yourself. On Linux:
@@ -91,4 +95,5 @@ ffmpeg -y -f v4l2 -input_format mjpeg -video_size 1920x1080 -i /dev/video0 -vf "
 
 - The screen overexposes on automatic, so turn exposure down, then restore whatever you changed. The values differ by camera.
 - That `select` skips about 5 s of frames for focus to settle. Earlier frames can be too blurry to read. Start it right after the app starts, or the app may be gone before it fires.
+- **For several pictures, lock the focus.** Capture once with a lit screen, then `v4l2-ctl -d /dev/video0 -c focus_automatic_continuous=0`, and later pictures only need `gte(n\,30)`. This gave readable text on every row. Set it back to 1 at the end.
 - Say what you actually read in the picture, not what you expected to see.
