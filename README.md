@@ -10,6 +10,8 @@ An app is one file. The same file can be started from an SD card, over MIDI, or 
 - **MIDI:** m-bootloader 2.2's MIDI mode and RAM stage can load and run an app, but nothing public sends one yet. M-Flasher's page has no button for it.
 - **SD card:** not available yet. It needs a picker on the card, which comes later.
 
+Writing apps with an agent? Start with [AGENTS.md](AGENTS.md), which has the loop, the rules and the traps found so far.
+
 ## Build
 
 You need the [pi32v2 LLVM toolchain](https://github.com/jvitkauskas/pi32v2-llvm) (see m-bootloader's README for the release) and Python 3.
