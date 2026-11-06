@@ -1,0 +1,4 @@
+[submodule "m-bootloader"]
+	path = m-bootloader
+	url = https://github.com/jvitkauskas/m-bootloader.git
+	branch = main
