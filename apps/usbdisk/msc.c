@@ -33,12 +33,21 @@ static const uint8_t config_descriptor[32] = {
     7, 5, EP_OUT, 2, PACKET, 0, 0
 };
 static const uint8_t language_string[4] = { 4, 3, 0x09, 0x04 };
-static const char product[] = "FM-1 USB DISK";
+#if APP_BOARD == 2
+#define PRODUCT "SMK-37 USB DISK"
+#else
+#define PRODUCT "FM-1 USB DISK"
+#endif
+static const char product[] = PRODUCT;
 static const char serial[] = "000000000001";
 static const uint8_t inquiry[36] = {
     0, 0x80, 0x02, 0x02, 31, 0, 0, 0,
     'M', '-', 'A', 'P', 'P', 'S', ' ', ' ',
+#if APP_BOARD == 2
+    'S', 'M', 'K', '-', '3', '7', ' ', 'U', 'S', 'B', ' ', 'D', 'I', 'S', 'K', ' ',
+#else
     'F', 'M', '-', '1', ' ', 'U', 'S', 'B', ' ', 'D', 'I', 'S', 'K', ' ', ' ', ' ',
+#endif
     '1', '.', '0', ' '
 };
 

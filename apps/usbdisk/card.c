@@ -1,10 +1,22 @@
 /* SPDX-License-Identifier: MIT */
-/* The card shares the panel's SPI1: CLK PC9, DI PC10, DO PC8 (the panel's D/C), CS = NOT PC7, so the card is selected
- * while PC7 is high (m-bootloader's docs/SPEC.md §11.5). */
+/* The card shares the panel's SPI1, with DO on the panel's D/C and CS the inverse of the panel's CS, so the card is
+ * selected while that's high (m-bootloader's docs/SPEC.md §11.5 for the FM-1).
+ * FM-1: CLK PC9, DI PC10, DO PC8, CS = NOT PC7. SMK-37: CLK PB6, DI PB7, DO PB5, CS = NOT PC8. */
 #include "card.h"
 #include "log.h"
 #include "platform.h"
 #define SPI1 0x11d00u
+#if APP_BOARD == 2
+#define CS_PORT 2
+#define CS_PIN 8
+#define DO_PORT 1
+#define DO_PIN 5
+#else
+#define CS_PORT 2
+#define CS_PIN 7
+#define DO_PORT 2
+#define DO_PIN 8
+#endif
 #define RETRIES 3u
 /* Single-block commands, and the wait for a block's start or for a write to finish. */
 #define TOKEN_WAIT 200000u
@@ -28,7 +40,7 @@ static uint8_t x(uint8_t b) {
 }
 
 static void select_card(bool on) {
-    gpio_level(2, 7, on);
+    gpio_level(CS_PORT, CS_PIN, on);
 }
 
 /* A card needs 8 more clocks to finish a transaction, and they may not come soon from the next command. */
@@ -74,12 +86,12 @@ static uint8_t command(uint8_t c, uint32_t argument) {
 }
 
 void card_open(unsigned lsb_mhz) {
-    /* A panel NOP (D/C low, CS low), so it ignores what follows; then PC8 is the card's DO, at about 400 kHz. */
-    gpio_level(2, 8, false);
+    /* A panel NOP (D/C low, CS low), so it ignores what follows; then D/C is the card's DO, at about 400 kHz. */
+    gpio_level(DO_PORT, DO_PIN, false);
     select_card(false);
     REG(SPI1) = 0x4021;
     x(0);
-    gpio_input(2, 8, true, false);
+    gpio_input(DO_PORT, DO_PIN, true, false);
     REG(SPI1) = 0x4029;
     REG(SPI1+4) = lsb_mhz*5/2-1;
 }
@@ -88,10 +100,10 @@ void card_close(void) {
     end_transaction();
     REG(SPI1) = 0x4021;
     REG(SPI1+4) = 4;
-    gpio_output(2, 8, true);
+    gpio_output(DO_PORT, DO_PIN, true);
 }
 
-/* Wiring decides what works: one prototype with long wires manages 8 MHz but not 12. CRCs catch a clock that's too fast,
+/* Wiring decides what works: an FM-1 prototype with long wires managed 8 MHz but not 12, and an SMK-37 12 but not 24. CRCs catch a clock that's too fast,
  * so startup takes the fastest that reads cleanly, and later errors step it down. */
 static const uint8_t clocks[] = {24, 12, 8, 6, 4};
 #define CLOCKS (sizeof(clocks)/sizeof(clocks[0]))
