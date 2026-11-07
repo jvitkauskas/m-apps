@@ -15,14 +15,19 @@ DRIVERS := core platform display board runtime usb_midi
 APPS := hello crashtest hangtest usbdisk
 # A stack for each app's C code. An app can override it: <name>_STACK := 0x8000
 APP_STACK_DEFAULT := 0x4000
+# The card's picker is linked below the apps' slot, in the 32 KiB stage 2 has (m-bootloader's docs/SPEC.md §11.5).
+picker_ORIGIN := 0x1c28000
+picker_LENGTH := 0x8000
+picker_STACK := 0x2000
 
-all: $(foreach a,$(APPS),build/fm1/$(a).app build/smk37/$(a).app) build/fm1/logread.bin build/smk37/logread.bin
+all: $(foreach a,$(APPS),build/fm1/$(a).app build/smk37/$(a).app) build/fm1/logread.bin build/smk37/logread.bin build/fm1/MENU.BIN build/smk37/MENU.BIN
 
 clean:
 	rm -rf build
 
 test:
 	python3 tests/applog_test.py
+	python3 tests/picker_test.py
 
 # make run APP=hello BOARD=fm1: start an app with run-ram, wait for it to end, and print its log.
 # make log BOARD=fm1: print the log an app left, however it was started.
@@ -39,7 +44,7 @@ define BOARD_template
 build/$(1)/drv/%.o: $(MB)/src/%.c Makefile
 	@mkdir -p $$(@D)
 	$(CLANG) $(CFLAGS) $(2) -DAPP_BOARD=$(3) -c $$< -o $$@
-build/$(1)/kit/%.o: kit/%.c kit/app.h kit/log.h Makefile
+build/$(1)/kit/%.o: kit/%.c kit/app.h kit/card.h kit/log.h Makefile
 	@mkdir -p $$(@D)
 	$(CLANG) $(CFLAGS) $(2) -DAPP_BOARD=$(3) -c $$< -o $$@
 build/$(1)/kit/start.o: kit/start.S Makefile
@@ -64,14 +69,18 @@ build/$(2)/$(1)/%.o: apps/$(1)/%.c $$(wildcard apps/$(1)/*.h) kit/app.h kit/log.
 	$(CLANG) $(CFLAGS) $(3) -DAPP_BOARD=$(4) -c $$< -o $$@
 build/$(2)/$(1)/app.ld: kit/app.ld.S Makefile
 	@mkdir -p $$(@D)
-	$(CLANG) -E -P -x c -DAPP_STACK=$$(or $$($(1)_STACK),$(APP_STACK_DEFAULT)) $$< -o $$@
-build/$(2)/$(1).elf: $$(patsubst apps/$(1)/%.c,build/$(2)/$(1)/%.o,$$(wildcard apps/$(1)/*.c)) build/$(2)/kit/app.o build/$(2)/kit/log.o build/$(2)/kit/start.o $$(addprefix build/$(2)/drv/,$$(addsuffix .o,$(DRIVERS))) build/$(2)/$(1)/app.ld
+	$(CLANG) -E -P -x c -DAPP_STACK=$$(or $$($(1)_STACK),$(APP_STACK_DEFAULT)) -DAPP_ORIGIN=$$(or $$($(1)_ORIGIN),0x1c30000) -DAPP_LENGTH=$$(or $$($(1)_LENGTH),0x4f000) $$< -o $$@
+build/$(2)/$(1).elf: $$(patsubst apps/$(1)/%.c,build/$(2)/$(1)/%.o,$$(wildcard apps/$(1)/*.c)) build/$(2)/kit/app.o build/$(2)/kit/card.o build/$(2)/kit/log.o build/$(2)/kit/start.o $$(addprefix build/$(2)/drv/,$$(addsuffix .o,$(DRIVERS))) build/$(2)/$(1)/app.ld
 	$(LINK) --plugin-opt=O3 --relax --gc-sections -T build/$(2)/$(1)/app.ld -Map build/$(2)/$(1).map -o $$@ $$(filter %.o,$$^)
 build/$(2)/$(1).app: build/$(2)/$(1).elf $(MB)/tools/stage2.py
 	$(OBJCOPY) -O binary -j .text $$< build/$(2)/$(1).raw
 	python3 $(MB)/tools/stage2.py --app $(2) build/$(2)/$(1).raw $$@
 endef
-$(foreach a,$(APPS),$(eval $(call APP_template,$(a),fm1,,1)))
-$(foreach a,$(APPS),$(eval $(call APP_template,$(a),smk37,-DBOARD_SMK,2)))
+$(foreach a,$(APPS) picker,$(eval $(call APP_template,$(a),fm1,,1)))
+$(foreach a,$(APPS) picker,$(eval $(call APP_template,$(a),smk37,-DBOARD_SMK,2)))
+
+build/%/MENU.BIN: build/%/picker.elf $(MB)/tools/stage2.py
+	$(OBJCOPY) -O binary -j .text $< build/$*/picker.raw
+	python3 $(MB)/tools/stage2.py build/$*/picker.raw $@
 
 .PHONY: all clean test run log

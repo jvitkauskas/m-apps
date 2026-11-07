@@ -49,6 +49,7 @@ The kit links these from m-bootloader's `src/`, and `--gc-sections` drops what a
 | `board.h` | `board_keys()` returns `KEY_PREV`, `KEY_NEXT`, `KEY_SELECT` and `KEY_RECOVERY` bits |
 | `platform.h` | `hal_delay_us()`, GPIO, flash, `REG()` and `hal_reset()` |
 | `usb_midi.h` | A polled USB-MIDI device on USB0 |
+| `kit/card.h` | The SD card on a modded unit, with CRCs and a clock probe |
 
 There's no C library beyond `memcpy`, `memmove`, `memset`, `memcmp`, `strlen` and 32-bit division. 64-bit division doesn't link (`__divdi3`).
 
@@ -70,7 +71,7 @@ These were all seen on real units unless they say otherwise.
 - **`.bss` is cleared each time,** but only because the kit does it. `.data` holds what the last run left, unless the file was loaded again.
 - **WiFi transmit DMA needs RAM below `0x01C20000`,** according to notes in other firmware projects. We haven't tested that here.
 - **A modded unit's SD card shares SPI1 with the screen** (SPEC §11.5 for the FM-1, README's `usbdisk` for both boards). Close one before using the other.
-- **SD cards have firmware quirks,** so handle an unexpected answer by restarting the card and retrying. One 32 GB card rejected a read of its last sector when it was reached by sequential reads a few ms apart, and then answered "illegal command" to everything until restarted, which took two attempts. A different card didn't do this. `apps/usbdisk/card.c` handles it.
+- **SD cards have firmware quirks,** so handle an unexpected answer by restarting the card and retrying. One 32 GB card rejected a read of its last sector when it was reached by sequential reads a few ms apart, and then answered "illegal command" to everything until restarted, which took two attempts. A different card didn't do this. `kit/card.c` handles it.
 - **All zeros pass a CRC however badly they're misread,** and most of a card's first sectors are blank. So test a clock or a sampling mode on sectors that hold data. A test that read 63 of 64 sectors "cleanly" had only read blank ones, and the mode it praised was reading wrong data every time.
 - **SPI1's clock is LSB/(divider+1),** so `lsb_mhz/4-1` gives 4 MHz, not LSB/4. On an FM-1 prototype, 8 MHz works and 12 doesn't, with 430 to 510 ohms on CLK and sampling on the other clock edge doesn't help. An SMK-37 prototype reads at 12 MHz and not at 24. The likely limit is the read path, as the card charges the FM-1's filter capacitor C82 through 220 ohms. On the FM-1, don't lower the CLK resistor to go faster: it isolates the card from the panel's clock, and at 330 ohms, 150 ohms or none the screen went blank or distorted.
 - **A card keeps its state through a soft reset,** because its power stays on. An app that leaves one stuck can make the bootloader's `SD CARD` item disappear until the unit is switched off and on. It also keeps CRC mode on, which the bootloader can't work with, so turn that off before leaving, as `card_finish()` does.
