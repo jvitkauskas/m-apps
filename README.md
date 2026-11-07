@@ -93,15 +93,24 @@ int app_main(unsigned lsb_mhz) {
 
 ### usbdisk
 
-Shows the FM-1's SD card to the computer as a USB disk, so files can be copied without taking the card out. It needs the card mod, and on the SMK-37 it only says there's no card.
+Shows the unit's SD card to the computer as a USB disk, so files can be copied without taking the card out. It needs a card mod, and has run on an FM-1 and an SMK-37.
+
+| Card pin | FM-1 | SMK-37 |
+|---|---|---|
+| CLK | PC9 | PB6 |
+| DI | PC10 | PB7 |
+| DO | PC8, through 220 ohms | PB5 |
+| CS | NOT PC7 | NOT PC8 |
+
+DO shares the panel's D/C, and CS is the inverse of the panel's CS.
 
 ```sh
-make run APP=usbdisk BOARD=fm1 RUN_FLAGS="--timeout 3600" M_FLASHER="sudo m-flasher"
+make run APP=usbdisk BOARD=smk37 RUN_FLAGS="--timeout 3600" M_FLASHER="sudo m-flasher"
 ```
 
-**To leave,** eject the disk on the computer, which is the way to use normally, or press PLAY, which doesn't wait for the computer to finish, so eject first if you can. With no computer attached, it also leaves after 2 minutes. It doesn't leave just because the disk is idle, as a computer can hold writes back for a while.
+**To leave,** eject the disk on the computer, which is the way to use normally, or press PLAY (SEQ PLAY on the SMK-37), which doesn't wait for the computer to finish, so eject first if you can. With no computer attached, it also leaves after 2 minutes. It doesn't leave just because the disk is idle, as a computer can hold writes back for a while.
 
-A write has reached the card before the computer is told it succeeded, and data is checked by CRC in both directions. It picks the fastest card clock that reads cleanly, from 24 MHz down to 4. On a prototype with long wires that's 8 MHz, giving about 750 KB/s reading and 440 KB/s writing from `run-ram`. USB 1.1 limits it to around 1 MB/s whatever the clock.
+A write has reached the card before the computer is told it succeeded, and data is checked by CRC in both directions. It picks the fastest card clock that reads cleanly, from 24 MHz down to 4. From `run-ram`, an FM-1 prototype with long wires settled on 8 MHz, at about 750 KB/s reading and 440 KB/s writing. An SMK-37 settled on 12 MHz, at about 870 KB/s reading and 440 KB/s writing. USB 1.1 limits it to around 1 MB/s whatever the clock.
 
 **On macOS:**
 - macOS gives up on mounting after 20 s (`ETIMEDOUT`), and it seems to read the whole FAT in that time. That's about 10 s on a 32 GB card with 16 KiB clusters. A larger FAT or a slower clock could fail to mount.

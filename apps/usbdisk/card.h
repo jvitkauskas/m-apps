@@ -3,7 +3,7 @@
 #define CARD_H
 #include <stdbool.h>
 #include <stdint.h>
-/* The FM-1's SD card on the panel's SPI1, in SPI mode with CRCs on both ways. Between card_open() and card_close() the
+/* The modded unit's SD card on the panel's SPI1, in SPI mode with CRCs on both ways. Between card_open() and card_close() the
  * screen can't be drawn. */
 void card_open(unsigned lsb_mhz);
 void card_close(void);

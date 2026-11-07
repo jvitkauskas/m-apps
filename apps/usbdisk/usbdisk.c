@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT */
-/* The FM-1's SD card as a USB disk. Eject it on the computer, or press PLAY, to leave. */
+/* A modded unit's SD card as a USB disk. Eject it on the computer, or press PLAY (SEQ PLAY on the SMK-37), to leave. */
 #include "app.h"
 #include "card.h"
 #include "msc.h"
@@ -20,15 +20,7 @@ static void show_error(bool screen, const char *text) {
 }
 
 int app_main(unsigned lsb_mhz) {
-#if APP_BOARD == 2
-    bool screen = display_init(APP_BOARD);
-    board_init(true);
-    show_error(screen, "NO CARD ON THIS UNIT");
-    board_restore();
-    (void)lsb_mhz;
-    return 1;
-#else
-    board_init(false);
+    board_init(APP_BOARD == 2);
     bool screen = display_init(APP_BOARD);
     if (screen) {
         for (unsigned row = 0; row < 15; ++row)
@@ -47,7 +39,7 @@ int app_main(unsigned lsb_mhz) {
     app_log("card: %u sectors, %u MiB", (unsigned)sectors, (unsigned)(sectors/2048));
     if (screen) {
         display_text(3, WHITE, "EJECT IT WHEN DONE");
-        display_text(4, WHITE, "OR PRESS PLAY");
+        display_text(4, WHITE, APP_BOARD == 2 ? "OR PRESS SEQ PLAY":"OR PRESS PLAY");
         display_text(6, WHITE, "ALWAYS EJECT FIRST");
     }
     /* A press that opened this doesn't count as leaving. */
@@ -91,5 +83,4 @@ int app_main(unsigned lsb_mhz) {
             (unsigned)(stats->sectors_read/2), (unsigned)(stats->sectors_written/2), (unsigned)stats->errors);
     board_restore();
     return 0;
-#endif
 }
