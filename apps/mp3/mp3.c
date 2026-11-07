@@ -29,7 +29,7 @@
 #define TIMER_COUNT REG(0x10804u)
 #define TIMER_PERIOD REG(0x10808u)
 #define TICKS_PER_US 24u
-static struct fat_entry files[MOST_FILES];
+static struct fat_named files[MOST_FILES];
 static unsigned count, lsb;
 static bool more;
 static mp3dec_t decoder;
@@ -58,22 +58,41 @@ static const char *read_files(void) {
     if (sectors) {
         error = fat_mount(sectors);
         if (!error)
-            error = fat_list(fat_root(), "MP3", files, MOST_FILES, &count, &more);
+            error = fat_list_named(fat_root(), "MP3", files, MOST_FILES, &count, &more);
         if (!error && !count)
             error = "NO MP3 FILES";
     }
     card_close();
     for (unsigned i = 0; i < count; ++i)
-        app_log("%c%c%c%c%c%c%c%c %u", files[i].name[0], files[i].name[1], files[i].name[2], files[i].name[3], files[i].name[4],
-                files[i].name[5], files[i].name[6], files[i].name[7], (unsigned)files[i].size);
+        app_log("%s %u", files[i].name, (unsigned)files[i].file.size);
     return error;
 }
+
+/* The name for the screen, which has no more than ASCII's capitals and a few others, and draws the rest as blanks. A
+ * better font only has to change this. It leaves off the .MP3. */
+static unsigned screen_name(char *out, unsigned room, const char *name) {
+    unsigned n = 0;
+    for (const uint8_t *p = (const uint8_t *)name; *p && n < room; ++p) {
+        if (*p < 0x80)
+            out[n++] = (char)*p;
+        else if (*p >= 0xc0)                    /* the first byte of a character */
+            out[n++] = '?';
+    }
+    if (n >= 4 && out[n-4] == '.' && (out[n-3]|32) == 'm' && (out[n-2]|32) == 'p' && out[n-1] == '3')
+        n -= 4;
+    return n;
+}
+
+/* The selected name, if it doesn't fit: it stays a moment, moves along to its end, and starts again. */
+static void (*on_tick)(void);
 
 static unsigned next_press(void) {
     unsigned held = board_keys(), last = held;
     for (;;) {
         hal_delay_us(POLL_US);
         app_feed();
+        if (on_tick)
+            on_tick();
         unsigned now = board_keys();
         if (now == last) {
             unsigned pressed = now&~held;
@@ -90,8 +109,32 @@ static void draw_row(unsigned row, const char *text, unsigned n, bool selected) 
     memset(line, ' ', COLUMNS);
     if (selected)
         line[0] = '>';
-    memcpy(line+2, text, n);
+    memcpy(line+2, text, n > COLUMNS-2 ? COLUMNS-2:n);
     display_row(row, selected ? YELLOW:WHITE, 0, line, COLUMNS);
+}
+
+#define NAME_ROOM (COLUMNS-2)
+#define SCROLL_WAIT_TICKS 50u
+#define SCROLL_STEP_TICKS 15u
+static char scroll_text[FAT_NAME_BYTES];
+static unsigned scroll_length, scroll_row, scroll_at, scroll_ticks;
+
+static void scroll_set(unsigned row, const char *name) {
+    scroll_length = screen_name(scroll_text, sizeof(scroll_text), name);
+    scroll_row = row;
+    scroll_at = 0;
+    scroll_ticks = 0;
+}
+
+static void scroll_tick(void) {
+    if (scroll_length <= NAME_ROOM)
+        return;
+    bool at_start = !scroll_at, at_end = scroll_at+NAME_ROOM >= scroll_length;
+    if (++scroll_ticks < (at_start || at_end ? SCROLL_WAIT_TICKS:SCROLL_STEP_TICKS))
+        return;
+    scroll_ticks = 0;
+    scroll_at = at_end ? 0:scroll_at+1;
+    draw_row(scroll_row, scroll_text+scroll_at, scroll_length-scroll_at, true);
 }
 
 static void clear_body(void) {
@@ -133,10 +176,10 @@ static void show_time(unsigned elapsed, unsigned total, struct stats *stats) {
     put_time(p+8, elapsed);
     uint32_t before = TIMER_COUNT;
     card_close();
-    display_text(5, WHITE, line);
+    display_text(6, WHITE, line);
     memcpy(line, "LEFT    ", 8);
     put_time(line+8, total > elapsed ? total-elapsed:0);
-    display_text(6, WHITE, line);
+    display_text(7, WHITE, line);
     card_open(lsb);
     card_fast(lsb);
     uint32_t took = (TIMER_COUNT-before)/TICKS_PER_US;
@@ -304,9 +347,13 @@ int app_main(unsigned lsb_mhz) {
             top = selection-ROWS+1;
         for (unsigned i = 0; i < ROWS; ++i) {
             unsigned item = top+i;
-            if (item < count)
-                draw_row(FIRST_ROW+i, files[item].name, 8, item == selection);
-            else if (item == count)
+            if (item < count) {
+                char shown[FAT_NAME_BYTES];
+                unsigned n = screen_name(shown, sizeof(shown), files[item].name);
+                draw_row(FIRST_ROW+i, shown, n, item == selection);
+                if (item == selection)
+                    scroll_set(FIRST_ROW+i, files[item].name);
+            } else if (item == count)
                 draw_row(FIRST_ROW+i, "BACK", 4, item == selection);
             else
                 display_text(FIRST_ROW+i, WHITE, "");
@@ -314,7 +361,11 @@ int app_main(unsigned lsb_mhz) {
         display_text(NOTE_ROW, RED, note ? note:"");
         display_text(HINT_ROW, GREY, APP_BOARD == 2 ? "< > MOVE SEQ PLAY GO":"OCT-/+ MOVE  PLAY GO");
         note = 0;
+        if (selection >= count)
+            scroll_length = 0;
+        on_tick = scroll_tick;
         unsigned keys = next_press();
+        on_tick = 0;
         if (keys&KEY_PREV)
             selection = selection ? selection-1:count;
         else if (keys&KEY_NEXT)
@@ -329,10 +380,16 @@ int app_main(unsigned lsb_mhz) {
             }
             clear_body();
             display_text(1, GREEN, "PLAYING");
-            draw_row(3, files[selection].name, 8, false);
+            /* All of it, on as many rows as it takes, up to where the time goes. */
+            char shown[FAT_NAME_BYTES];
+            unsigned n = screen_name(shown, sizeof(shown), files[selection].name);
+            for (unsigned part = 0; part < 2 && part*COLUMNS < n; ++part) {
+                unsigned left = n-part*COLUMNS;
+                display_row(3+part, WHITE, 0, shown+part*COLUMNS, left > COLUMNS ? COLUMNS:left);
+            }
             display_text(HINT_ROW, GREY, "ANY KEY: BACK");
             struct stats stats;
-            note = play(&files[selection], &stats);
+            note = play(&files[selection].file, &stats);
             app_log("played %u frames in %u ms: %u late, longest read %u us, decode %u us, draw %u us, waited %u ms",
                     (unsigned)stats.frames, (unsigned)(stats.busy/1000u), (unsigned)stats.late, (unsigned)stats.most_read, (unsigned)stats.most_decode,
                     (unsigned)stats.most_draw, (unsigned)(stats.waited/1000u));

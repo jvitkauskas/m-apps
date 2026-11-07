@@ -126,14 +126,26 @@ static bool set_next(uint32_t c, uint32_t value) {
     return true;
 }
 
+#define LONG_PIECE 13u
+#define MOST_LONG_PIECES 20u
+#define LONG_FLAG_LAST 0x40u
+#define LONG_ATTRIBUTES 0x0fu
+static const uint8_t long_places[LONG_PIECE] = {1, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30};
+static uint16_t long_units[LONG_PIECE*MOST_LONG_PIECES+1];
+
 struct walk {
     const char *match;
     uint32_t found, size, sector;
     unsigned at;
     bool is_found;
     struct fat_entry *entries;
+    struct fat_named *named;
     unsigned max, count;
     bool more;
+    /* The long name being read: pieces come last first, each with the short name's checksum. */
+    unsigned long_next;
+    uint8_t long_sum;
+    bool long_whole;
 };
 
 static uint32_t entry_start(const uint8_t *e) {
@@ -174,6 +186,117 @@ static void visit_file(struct walk *w, const uint8_t *e) {
     ++w->count;
 }
 
+static void long_piece(struct walk *w, const uint8_t *e) {
+    unsigned piece = e[0]&(LONG_FLAG_LAST-1u);
+    if (e[0]&LONG_FLAG_LAST) {
+        w->long_whole = false;
+        w->long_next = piece;
+        w->long_sum = e[13];
+        if (piece >= 1 && piece <= MOST_LONG_PIECES)
+            long_units[piece*LONG_PIECE] = 0;
+        else
+            w->long_next = 0;
+    }
+    if (!w->long_next || piece != w->long_next || e[13] != w->long_sum) {
+        w->long_next = 0;
+        return;
+    }
+    for (unsigned i = 0; i < LONG_PIECE; ++i)
+        long_units[(piece-1)*LONG_PIECE+i] = core_le16(e+long_places[i]);
+    if (!--w->long_next)
+        w->long_whole = true;
+}
+
+static uint8_t short_sum(const uint8_t *e) {
+    uint8_t sum = 0;
+    for (unsigned i = 0; i < 11; ++i)
+        sum = (uint8_t)((sum >> 1 | sum << 7)+e[i]);
+    return sum;
+}
+
+static unsigned utf8_length(uint32_t c) {
+    return c < 0x80 ? 1:c < 0x800 ? 2:c < 0x10000 ? 3:4;
+}
+
+/* Stops between characters, and leaves a terminator. */
+static void long_name_utf8(char *out) {
+    unsigned at = 0;
+    for (unsigned i = 0; long_units[i] && long_units[i] != 0xffffu && i < LONG_PIECE*MOST_LONG_PIECES; ++i) {
+        uint32_t c = long_units[i];
+        if (c >= 0xd800 && c < 0xdc00 && long_units[i+1] >= 0xdc00 && long_units[i+1] < 0xe000)
+            c = 0x10000u+((c-0xd800u) << 10)+(long_units[++i]-0xdc00u);
+        else if (c >= 0xd800 && c < 0xe000)
+            c = 0xfffdu;
+        unsigned n = utf8_length(c);
+        if (at+n >= FAT_NAME_BYTES)
+            break;
+        static const uint8_t lead[5] = {0, 0, 0xc0, 0xe0, 0xf0};
+        if (n == 1)
+            out[at++] = (char)c;
+        else {
+            out[at] = (char)(lead[n] | c >> (6*(n-1)));
+            for (unsigned b = 1; b < n; ++b)
+                out[at+b] = (char)(0x80u | (c >> (6*(n-1-b))&0x3fu));
+            at += n;
+        }
+    }
+    out[at] = 0;
+}
+
+/* A computer may keep a short name's case in two bits of its entry, rather than a long name. Bytes past ASCII are in a
+ * code page the name doesn't say, so they can't be turned into UTF-8. */
+static char short_char(uint8_t c, bool lower) {
+    if (c >= 0x80)
+        return '?';
+    return (char)(lower && c >= 'A' && c <= 'Z' ? c+32:c);
+}
+
+static void short_name(char *out, const uint8_t *e) {
+    unsigned at = 0;
+    for (unsigned i = 0; i < 8 && e[i] != ' '; ++i)
+        out[at++] = short_char(e[i], e[12]&0x08);
+    if (e[8] != ' ')
+        out[at++] = '.';
+    for (unsigned i = 8; i < 11 && e[i] != ' '; ++i)
+        out[at++] = short_char(e[i], e[12]&0x10);
+    out[at] = 0;
+}
+
+static int name_order(const char *a, const char *b) {
+    for (;; ++a, ++b) {
+        int x = (uint8_t)*a, y = (uint8_t)*b;
+        x = x >= 'a' && x <= 'z' ? x-32:x;
+        y = y >= 'a' && y <= 'z' ? y-32:y;
+        if (x != y || !x)
+            return x-y;
+    }
+}
+
+static void visit_named(struct walk *w, const uint8_t *e) {
+    if (e[11]&0x10 || memcmp(e+8, w->match, 3))
+        return;
+    static char name[FAT_NAME_BYTES];
+    if (w->long_whole && w->long_sum == short_sum(e))
+        long_name_utf8(name);
+    else
+        short_name(name, e);
+    unsigned at = 0;
+    while (at < w->count && name_order(w->named[at].name, name) < 0)
+        ++at;
+    if (w->count == w->max) {
+        w->more = true;
+        if (at == w->max)
+            return;
+        --w->count;
+    }
+    memmove(w->named+at+1, w->named+at, (w->count-at)*sizeof(struct fat_named));
+    memcpy(w->named[at].file.name, e, sizeof(w->named[at].file.name));
+    w->named[at].file.start = entry_start(e);
+    w->named[at].file.size = core_le32(e+28);
+    memcpy(w->named[at].name, name, FAT_NAME_BYTES);
+    ++w->count;
+}
+
 static const char *walk(uint32_t c, void (*visit)(struct walk *, const uint8_t *), struct walk *w) {
     unsigned seen = 0;
     if (!cluster_ok(c))
@@ -190,12 +313,19 @@ static const char *walk(uint32_t c, void (*visit)(struct walk *, const uint8_t *
                     return 0;
                 if (++seen > MOST_ENTRIES)
                     return BAD_FOLDER;
-                /* Deleted, or a volume label or a piece of a long name. */
+                if (e[0] != 0xe5 && e[11] == LONG_ATTRIBUTES) {
+                    long_piece(w, e);
+                    continue;
+                }
+                /* Deleted, or a volume label. */
                 if (e[0] != 0xe5 && !(e[11]&0x08)) {
                     visit(w, e);
                     if (w->is_found)
                         return 0;
                 }
+                /* A long name belongs only to the entry right after it. */
+                w->long_next = 0;
+                w->long_whole = false;
             }
         }
         app_feed();
@@ -225,6 +355,15 @@ const char *fat_list(uint32_t cluster, const char extension[3], struct fat_entry
                      bool *more) {
     struct walk w = {.match = extension, .entries = entries, .max = max};
     const char *error = walk(cluster, visit_file, &w);
+    *count = w.count;
+    *more = w.more;
+    return error;
+}
+
+const char *fat_list_named(uint32_t cluster, const char extension[3], struct fat_named *entries, unsigned max, unsigned *count,
+                           bool *more) {
+    struct walk w = {.match = extension, .named = entries, .max = max};
+    const char *error = walk(cluster, visit_named, &w);
     *count = w.count;
     *more = w.more;
     return error;
