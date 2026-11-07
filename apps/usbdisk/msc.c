@@ -535,8 +535,9 @@ static bool receive_sector(uint8_t *to) {
 
 static void write_failed(void) {
     fail(3, 0x0c);
-    /* With all the data in, the host has nothing to send, so it wouldn't find a stall and clear it. */
-    if (moved < expected)
+    /* With all the data in, the host has nothing to send, so it wouldn't find a stall and clear it. After a reset, the
+     * command is gone, and a stall would only get in the next one's way. */
+    if (moved < expected && !aborted)
         stall_out();
 }
 
