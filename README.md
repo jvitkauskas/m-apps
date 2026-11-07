@@ -4,9 +4,9 @@ Programs that run from RAM on the M-VAVE FM-1 and SMK-37, without changing the f
 
 An app is one file. The same file can be started from an SD card, over MIDI, or with M-Flasher's `run-ram`. The format and the rules are in [m-bootloader's SPEC, §11.8](https://github.com/jvitkauskas/m-bootloader/blob/main/docs/SPEC.md).
 
-**Status:** early. `hello` has run on an FM-1 and an SMK-37, from `run-ram` and over MIDI.
+**Status:** early. `hello` and `usbdisk` have run on an FM-1 and an SMK-37, and `picker` on an SMK-37. There are no releases yet, so build from source.
 
-- **`run-ram`:** `make run` below uses this. The address needs an M-Flasher newer than 0.9.1, which isn't released yet.
+- **`run-ram`:** `make run` below uses this. It needs M-Flasher 0.9.2 or newer.
 - **MIDI:** m-bootloader 2.2's MIDI mode and RAM stage can load and run an app, but nothing public sends one yet. M-Flasher's page has no button for it.
 - **SD card:** `picker` below lists the apps on a card and starts one, from the bootloader's `SD CARD` item. That has run on an SMK-37, with [m-bootloader #22](https://github.com/jvitkauskas/m-bootloader/pull/22), which isn't released yet. It hasn't run on an FM-1.
 
