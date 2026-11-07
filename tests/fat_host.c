@@ -13,6 +13,14 @@ static uint32_t sectors, fail_sector = 0xffffffffu;
 void app_feed(void) {
 }
 
+/* The picker never writes, so a write here is a bug. */
+bool card_write(uint32_t sector, const uint8_t *data) {
+    (void)sector;
+    (void)data;
+    fprintf(stderr, "a write\n");
+    abort();
+}
+
 bool card_read(uint32_t sector, uint8_t *data) {
     if (sector >= sectors) {
         fprintf(stderr, "read beyond the card: sector %u\n", sector);

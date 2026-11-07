@@ -123,7 +123,7 @@ with tempfile.TemporaryDirectory() as folder:
     host = folder/'host'
     subprocess.run([os.environ.get('HOSTCC', 'cc'), '-std=c11', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
                     f'-I{ROOT}/apps/picker', f'-I{ROOT}/kit', '-idirafter', f'{ROOT}/m-bootloader/include', '-DPLATFORM_SIM',
-                    ROOT/'tests/fat_host.c', ROOT/'apps/picker/fat.c', ROOT/'apps/picker/load.c', ROOT/'m-bootloader/src/core.c',
+                    ROOT/'tests/fat_host.c', ROOT/'kit/fat.c', ROOT/'apps/picker/load.c', ROOT/'m-bootloader/src/core.c',
                     '-o', host], check=True)
 
     def run(image, name='-', board=2, fail='-'):
