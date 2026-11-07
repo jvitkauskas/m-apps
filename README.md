@@ -125,7 +125,7 @@ A slot is `/MBOOT/SLOTS/<8 hex digits>/NAME.BIN`, in a folder named from the uni
 - **The list** marks the slot `ON UNIT`. `SAVE AS NEW SLOT` saves what's there as `SLOT01` and so on. Choosing a slot offers `LOAD` and `DELETE`, each needing a 3 s hold.
 - **Loading** writes what a restore does: not the boot area, the key area, or the SMK-37's Bluetooth and calibration sectors. It takes about 30 s, and then the unit restarts into that firmware.
 - **It saves first.** Before writing, what's on the unit goes over the slot it came from, or into a new slot if it's other firmware, or if the slot being loaded is the one it came from. If a slot already holds it, nothing is saved. If there's no room, it stops with nothing erased.
-- **If the power goes,** switch on holding PLAY (SEQ PLAY on the SMK-37). With no valid firmware, the bootloader's menu opens anyway. Choose `SD CARD`, then `SLOTS`, and it shows `LAST LOAD STOPPED` with that slot selected. What isn't valid firmware is never saved, so the slot stays good. Load it again.
+- **If the power goes,** switch on again. With no valid firmware, the bootloader's menu opens by itself, showing `APP NOT FOUND`. Choose `SD CARD`, then `SLOTS`, and it shows `LAST LOAD STOPPED` with that slot selected. What isn't valid firmware is never saved, so the slot stays good. Load it again.
 
 The card is written in an order where losing power leaves, at worst, clusters no file uses, which `fsck` can reclaim. The guard stays on while flash is written, unlike what the rule below says for other apps, as each sector feeds it. So only a real hang reaches it, and then the unit ends in download mode.
 
