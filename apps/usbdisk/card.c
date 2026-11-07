@@ -120,11 +120,14 @@ static void log_failure(const char *what, uint32_t sector, unsigned detail, unsi
 }
 
 /* Keeping the card's DI high between bytes, as it was left by the last x(0xff). */
-static void receive(uint8_t *p, unsigned n) {
+static void receive_start(uint8_t *p, unsigned n) {
     REG(SPI1) |= BIT(14) | BIT(12);
     REG(SPI1+0x0c) = DMA_ADDRESS(p);
     sync_cpu();
     REG(SPI1+0x10) = n;
+}
+
+static void receive_finish(void) {
     for (unsigned i = 0; i < 400000 && !(REG(SPI1)&BIT(15)); ++i)
         ;
     REG(SPI1) &= ~BIT(12);
@@ -132,16 +135,17 @@ static void receive(uint8_t *p, unsigned n) {
     __asm__ volatile("ssync" ::: "memory");
 }
 
-/* A block of n bytes after the command's answer, with its CRC checked. */
-static bool read_block(uint8_t *p, unsigned n, uint32_t sector) {
+static bool block_token(uint32_t sector) {
     uint8_t r = 0xff;
     for (unsigned i = 0; i < TOKEN_WAIT && (r = x(0xff)) == 0xff; ++i)
         ;
-    if (r != 0xfe) {
+    if (r != 0xfe)
         log_failure("token", sector, r, 0);
-        return false;
-    }
-    receive(p, n);
+    return r == 0xfe;
+}
+
+/* After the data: its CRC, then the check. */
+static bool block_check(const uint8_t *p, unsigned n, uint32_t sector) {
     uint16_t got = (uint16_t)(x(0xff) << 8);
     got |= x(0xff);
     uint16_t want = crc16(p, n);
@@ -151,6 +155,15 @@ static bool read_block(uint8_t *p, unsigned n, uint32_t sector) {
             slow_down();
     }
     return got == want;
+}
+
+/* A block of n bytes after the command's answer, with its CRC checked. */
+static bool read_block(uint8_t *p, unsigned n, uint32_t sector) {
+    if (!block_token(sector))
+        return false;
+    receive_start(p, n);
+    receive_finish();
+    return block_check(p, n, sector);
 }
 
 static uint32_t read_size(void) {
@@ -295,8 +308,16 @@ bool card_stream_start(uint32_t sector) {
     return true;
 }
 
-bool card_stream_read(uint8_t *data) {
-    return read_block(data, 512, stream_at++);
+bool card_stream_begin(uint8_t *data) {
+    if (!block_token(stream_at))
+        return false;
+    receive_start(data, 512);
+    return true;
+}
+
+bool card_stream_finish(uint8_t *data) {
+    receive_finish();
+    return block_check(data, 512, stream_at++);
 }
 
 void card_stream_stop(void) {
@@ -309,11 +330,12 @@ void card_stream_stop(void) {
     uint8_t r = 0xff;
     for (unsigned i = 0; i < 16 && ((r = x(0xff))&0x80); ++i)
         ;
-    for (unsigned i = 0; i < BUSY_WAIT && x(0xff) != 0xff; ++i)
-        ;
+    bool ready = false;
+    for (unsigned i = 0; i < BUSY_WAIT && !ready; ++i)
+        ready = x(0xff) == 0xff;
     end_transaction();
-    if (r&0x7e) {
-        log_failure("stream stop", stream_at, r, 0);
+    if ((r&0x7e) || !ready) {
+        log_failure("stream stop", stream_at, r, ready);
         start();
     }
 }
@@ -359,4 +381,62 @@ bool card_write(uint32_t sector, const uint8_t *data) {
             return false;
     }
     return false;
+}
+
+static uint16_t write_crc;
+static uint32_t write_at;
+
+bool card_write_stream_start(uint32_t sector) {
+    uint8_t answer = command(25, block_addressed ? sector:sector << 9);
+    if (answer) {
+        log_failure("write stream", sector, answer, 0);
+        end_transaction();
+        start();
+        return false;
+    }
+    x(0xff);
+    write_at = sector;
+    return true;
+}
+
+void card_write_stream_begin(const uint8_t *data) {
+    write_crc = crc16(data, 512);
+    x(0xfc);
+    REG(SPI1) |= BIT(14);
+    REG(SPI1+0x0c) = DMA_ADDRESS(data);
+    sync_cpu();
+    REG(SPI1+0x10) = 512;
+}
+
+bool card_write_stream_finish(void) {
+    for (unsigned i = 0; i < 400000 && !(REG(SPI1)&BIT(15)); ++i)
+        ;
+    REG(SPI1) |= BIT(14);
+    x((uint8_t)(write_crc >> 8));
+    x((uint8_t)write_crc);
+    uint8_t accepted = x(0xff)&0x1f;
+    bool ok = accepted == 0x05 && wait_ready();
+    if (!ok) {
+        log_failure("write stream data", write_at, accepted, 0);
+        slow_down();
+    }
+    ++write_at;
+    return ok;
+}
+
+bool card_write_stream_stop(void) {
+    x(0xfd);
+    x(0xff);
+    bool ok = wait_ready();
+    if (ok) {
+        uint8_t first = command(13, 0), second = x(0xff);
+        ok = !first && !second;
+        if (!ok)
+            log_failure("write stream status", write_at, first, second);
+    } else
+        log_failure("write stream stop", write_at, 0, 0);
+    end_transaction();
+    if (!ok)
+        start();
+    return ok;
 }
