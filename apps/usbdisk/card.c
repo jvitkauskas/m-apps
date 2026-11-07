@@ -236,6 +236,45 @@ static bool start(void) {
     return false;
 }
 
+static bool probe_read(uint32_t sector) {
+    bool ok = !command(17, block_addressed ? sector:sector << 9) && read_block(probe_block, 512, sector);
+    end_transaction();
+    return ok;
+}
+
+static uint32_t probe_le32(unsigned at) {
+    return probe_block[at] | (uint32_t)probe_block[at+1] << 8 | (uint32_t)probe_block[at+2] << 16
+           | (uint32_t)probe_block[at+3] << 24;
+}
+
+/* Whether this clock reads cleanly. Blank sectors prove nothing, as all zeros pass a CRC however they're misread, and
+ * most of a card's first sectors are blank. So this reads what's likely to hold data: the partition table, the first
+ * partition's boot sector, and the start of its FAT. A card with no filesystem must still pass, so it can be formatted,
+ * and these reads are then just more checked data. */
+static bool probe_reads(uint32_t size) {
+    if (!probe_read(0))
+        return false;
+    uint32_t partition = probe_block[510] == 0x55 && probe_block[511] == 0xaa && probe_block[450] ? probe_le32(454):0;
+    /* Without a partition table, those bytes mean nothing, and sector 0 may be the boot sector itself. */
+    if (partition >= size)
+        partition = 0;
+    if (!probe_read(partition))
+        return false;
+    uint32_t reserved = probe_block[14] | (uint32_t)probe_block[15] << 8;
+    unsigned with_data = 0;
+    for (uint32_t i = 0; i < 16 && partition+reserved+i < size; ++i) {
+        if (!probe_read(partition+reserved+i))
+            return false;
+        for (unsigned b = 0; b < 512; ++b)
+            if (probe_block[b] && probe_block[b] != 0xff) {
+                ++with_data;
+                break;
+            }
+    }
+    app_log("card: %u of 16 test sectors held data", with_data);
+    return true;
+}
+
 uint32_t card_start(unsigned lsb_mhz) {
     clock_mhz = lsb_mhz;
     for (unsigned i = 0; i < 256; ++i) {
@@ -250,13 +289,7 @@ uint32_t card_start(unsigned lsb_mhz) {
         if (!start())
             continue;
         uint32_t size = read_size();
-        bool clean = size != 0;
-        for (uint32_t sector = 0; sector < 32 && clean; ++sector) {
-            bool ok = !command(17, block_addressed ? sector:sector << 9) && read_block(probe_block, 512, sector);
-            end_transaction();
-            clean = ok;
-        }
-        if (clean) {
+        if (size && probe_reads(size)) {
             clock_settled = true;
             app_log("card: %u MHz", clocks[clock_step]);
             return size;
