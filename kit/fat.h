@@ -19,6 +19,16 @@ const char *fat_folder(uint32_t *cluster, const char name[11], const char *missi
 /* The files with this extension, in name order. With more than max, it keeps the first max and sets *more. */
 const char *fat_list(uint32_t cluster, const char extension[3], struct fat_entry *entries, unsigned max, unsigned *count,
                      bool *more);
+/* The same with each file's name, as a computer shows it, in UTF-8: its long name if it has one, cut at FAT_NAME_BYTES-1
+ * bytes between characters, and otherwise its short one, as NAME.EXT. They come in name order, ignoring ASCII case. What
+ * to do with characters the screen doesn't have is the app's business. */
+#define FAT_NAME_BYTES 72u
+struct fat_named {
+    struct fat_entry file;
+    char name[FAT_NAME_BYTES];
+};
+const char *fat_list_named(uint32_t cluster, const char extension[3], struct fat_named *entries, unsigned max, unsigned *count,
+                           bool *more);
 /* Writes n bytes and no more. False if the card or the file's chain fails, or it's beyond the file's end. */
 bool fat_read(const struct fat_entry *file, uint32_t offset, void *to, uint32_t n);
 

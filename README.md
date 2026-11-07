@@ -9,6 +9,7 @@ An app is one file. The same file can be started from an SD card, over MIDI, or 
 - **`run-ram`:** `make run` below uses this. It needs M-Flasher 0.9.2 or newer.
 - **MIDI:** m-bootloader 2.2's MIDI mode and RAM stage can load and run an app, but nothing public sends one yet. M-Flasher's page has no button for it.
 - **Firmware slots:** `slots` below keeps whole flash images on the card, and swaps between them with no computer.
+- **Sound:** `mp3` below plays MP3 files from the card, and has run on an SMK-37.
 - **SD card:** `picker` below lists the apps on a card and starts one, from the bootloader's `SD CARD` item. That has run on an SMK-37, with [m-bootloader #22](https://github.com/jvitkauskas/m-bootloader/pull/22), which isn't released yet. It hasn't run on an FM-1.
 
 Writing apps with an agent? Start with [AGENTS.md](AGENTS.md), which has the loop, the rules and the traps found so far.
@@ -116,6 +117,17 @@ sudo m-flasher run-ram build/smk37/MENU.BIN --addr 0x01C28000
 - **Returning:** an app that returns comes back to the list, which is read again, as the app may have changed the card. A non-zero result shows as `RETURNED 7`. It shows the first 100 apps by name.
 - **Size:** it refuses a file over `0x4F000` bytes, the most the kit can build, as the log starts where that ends.
 
+### mp3
+
+Lists the MP3 files in the card's root, plays the one you choose, and shows the time elapsed and left. It needs a card mod, and `picker` to start it: put `build/<board>/mp3.app` on the card as `/MBOOT/APPS/MP3.APP`. It's mainly a reference for playing sound and reading a card at once, so it has no pause, seeking or volume.
+
+- **Sound** comes from `kit/audio.c`, polled, with no interrupts: fill a half buffer each time one comes free. The DAC runs at 24 MHz / 544, about 44118 Hz, which plays 44.1 kHz files 0.04% fast. Other rates go through a simple resampler. If filling falls behind, the hardware repeats old samples, and nothing warns of it, so the app counts missed halves in its log.
+- **Decoding** is [minimp3](https://github.com/lieff/minimp3). At the CPU's 360 MHz from the bootloader, a 320 kbps frame took about 3.3 ms of its 26 ms. It also keeps up at 96 MHz from `run-ram`, at about 12.5 ms.
+- **Names** come from `fat_list_named()` in UTF-8. `screen_name()` is the one function turning them into what the screen has, which is capitals and a few others, with blanks for what it lacks and `?` past ASCII. To use a better font, start there.
+- **The time left** comes from the frame count in a file's first frame if it has one, and otherwise from its size and bitrate.
+
+`apps/tone` is a smaller start: two tones, with the real sample rate in its log.
+
 ### slots
 
 Keeps firmware and its settings on the card, and swaps between them with no computer. It needs a card mod, and `picker` to start it: put `build/<board>/slots.app` on the card as `/MBOOT/APPS/SLOTS.APP`.
@@ -157,4 +169,7 @@ A write has reached the card before the computer is told it succeeded, and data 
 
 ## License
 
-MIT, as m-bootloader is. See [LICENSE](LICENSE).
+MIT, as m-bootloader is. See [LICENSE](LICENSE). Two parts have their own licences, and each file's header says which:
+
+- `kit/audio.c` and `kit/audio.h` are MPL-2.0, adapted from [felucca-bsp](https://github.com/hugelton/felucca-bsp). MPL applies file by file, so changes to these two files stay MPL-2.0, and an app using them can have any licence.
+- `apps/mp3/minimp3.h` is [minimp3](https://github.com/lieff/minimp3), CC0-1.0.

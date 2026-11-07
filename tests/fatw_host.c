@@ -118,6 +118,14 @@ int main(int argc, char **argv) {
     } else if (!strcmp(op, "remove")) {
         pad(name, argv[5]);
         check(fat_remove(folder(argv[4], false), name));
+    } else if (!strcmp(op, "names")) {
+        static struct fat_named named[8];
+        unsigned count;
+        bool more;
+        check(fat_list_named(folder(argv[4], false), argv[5], named, 8, &count, &more));
+        printf("count %u %u\n", count, more);
+        for (unsigned i = 0; i < count; ++i)
+            printf("name\t-\t%u\t%s\n", named[i].file.size, named[i].name);
     } else if (!strcmp(op, "reserve")) {
         uint32_t start = 0;
         check(fat_reserve((uint32_t)atol(argv[4]), &start));

@@ -114,6 +114,119 @@ with tempfile.TemporaryDirectory() as folder:
     assert get('D', 'AGAIN.BIN') == b'again'
     fsck()
 
+    # Names, as a computer wrote them.
+    make(per_cluster=1)
+    run('mkdir', 'N')
+    wanted = ['plain.mp3', 'UPPER.MP3', 'Mixed Case Song (Live) & more!.mp3', 'exactly13char.mp3', 'ąčęėįšųūž lietuviškai.mp3', '日本語の歌.mp3']
+    for name in wanted:
+        put('N', name, name.encode())
+    put('N', 'a.txt', b'not listed')
+    subprocess.run([MMD, '-i', image, '::/N/folder.mp3'], check=True, env=ENV)
+    def names(ext='MP3'):
+        lines = run('names', 'N', ext).splitlines()
+        return [l.split('\t')[3] for l in lines if l.startswith('name\t')], lines
+    got, lines = names()
+    assert lines[0] == f'count {len(wanted)} 0', lines
+    assert sorted(got) == sorted(wanted), got
+    assert [n.upper() for n in got if n.isascii()] == sorted(n.upper() for n in wanted if n.isascii()), got
+    # Sizes come with the right file.
+    for line in (l for l in lines if l.startswith('name\t')):
+        _, _, size, name = line.split('\t')
+        assert int(size) == len(name.encode()), line
+    # Past what's kept: cut between characters, and past the list's size, the first in order.
+    make(per_cluster=1)
+    run('mkdir', 'N')
+    cut = 'é'*100+'.mp3'
+    put('N', cut, b'x')
+    got, _ = names()
+    assert got == ['é'*35], got
+    long_ascii = 'x'*200+'.mp3'
+    put('N', long_ascii, b'x')
+    got, _ = names()
+    assert 'x'*71 in got, got
+    make(per_cluster=1)
+    run('mkdir', 'N')
+    for i in reversed(range(12)):
+        put('N', f'song number {i:02}.mp3', b'x')
+    got, lines = names()
+    assert lines[0] == 'count 8 1' and got == [f'song number {i:02}.mp3' for i in range(8)], lines
+    # A short name's case bits, and a deleted long name's pieces that were left behind.
+    raw = bytearray(image.read_bytes())
+    make(per_cluster=1)
+    run('mkdir', 'N')
+    put('N', 'long name one.mp3', b'1')
+    put('N', 'long name two.mp3', b'2')
+    new('N', 'SHORT.MP3', b's')
+    raw = bytearray(image.read_bytes())
+    reserved, fats, fat_size, root = int.from_bytes(raw[14:16], 'little'), raw[16], int.from_bytes(raw[36:40], 'little'), int.from_bytes(raw[44:48], 'little')
+    data_at = (reserved+fats*fat_size)*512
+    at = data_at+(root-2)*512
+    while raw[at:at+11] != b'N          ':
+        at += 32
+    folder_at = data_at+(int.from_bytes(raw[at+26:at+28], 'little')-2)*512
+    entries = [folder_at+i*32 for i in range(16)]
+    short = next(p for p in entries if raw[p:p+11] == b'SHORT   MP3')
+    raw[short+12] = 0x18
+    # The short entry of the first long name goes, as a tool might leave it: its pieces then belong to nothing.
+    first_long = next(p for p in entries if raw[p+11] != 0x0f and raw[p:p+6] == b'LONGNA' and raw[p] != 0xe5)
+    raw[first_long] = 0xe5
+    # And the second's checksum goes wrong: it falls back to its short name.
+    second_long = next(p for p in entries if raw[p+11] != 0x0f and raw[p:p+6] == b'LONGNA' and p != first_long)
+    second_short = bytes(raw[second_long:second_long+11]).decode()
+    raw[second_long+10] = ord('X')
+    raw[second_long+8:second_long+11] = b'MP3'
+    raw[second_long+6] = ord('7')
+    second_short = bytes(raw[second_long:second_long+11]).decode()
+    image.write_bytes(bytes(raw))
+    got, _ = names()
+    assert sorted(got) == sorted(['short.mp3', second_short[:8].strip()+'.MP3']), got
+    # Beyond the 16 bits mtools writes: a surrogate pair, one with half missing, and a name of exactly 13 units with no end mark.
+    def entries_for(units, name11, start):
+        total = (len(units)+12)//13
+        padded = units+[0]+[0xffff]*12 if len(units) % 13 else units
+        total = max(1, (len(units)+12)//13)
+        sum_ = 0
+        for b in name11:
+            sum_ = ((sum_ >> 1 | sum_ << 7) & 255)+b & 255
+        out = b''
+        for piece in range(total, 0, -1):
+            part = (padded+[0xffff]*13)[(piece-1)*13:piece*13]
+            e = bytearray(32)
+            e[0] = piece | (0x40 if piece == total else 0)
+            for place, unit in zip((1, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30), part):
+                e[place:place+2] = unit.to_bytes(2, 'little')
+            e[11] = 0x0f
+            e[13] = sum_
+            out += bytes(e)
+        short_entry = bytearray(32)
+        short_entry[:11] = name11
+        short_entry[11] = 0x20
+        short_entry[26:28] = start.to_bytes(2, 'little')
+        short_entry[28:32] = (1).to_bytes(4, 'little')
+        return out+bytes(short_entry)
+    make(per_cluster=1)
+    run('mkdir', 'N')
+    new('N', 'DATA.MP3', b'd')
+    raw = bytearray(image.read_bytes())
+    reserved, fats, fat_size, root = int.from_bytes(raw[14:16], 'little'), raw[16], int.from_bytes(raw[36:40], 'little'), int.from_bytes(raw[44:48], 'little')
+    data_at = (reserved+fats*fat_size)*512
+    at = data_at+(root-2)*512
+    while raw[at:at+11] != b'N          ':
+        at += 32
+    place = data_at+(int.from_bytes(raw[at+26:at+28], 'little')-2)*512
+    while raw[place:place+11] != b'DATA    MP3':
+        place += 32
+    start = int.from_bytes(raw[place+26:place+28], 'little')
+    place += 32
+    made = entries_for([ord(c) for c in 'emoji ']+[0xd83c, 0xdfb5]+[ord(c) for c in ' song.mp3'], b'EMOJI   MP3', start)
+    made += entries_for([ord('a'), 0xd83c, ord('b')]+[ord(c) for c in '.mp3'], b'BROKEN  MP3', start)
+    made += entries_for([ord(c) for c in 'thirteen1.mp3'], b'THIRTEENMP3', start)
+    made += bytes(entries_for([], b'\x90CODE   MP3', start)[-32:])
+    raw[place:place+len(made)] = made
+    image.write_bytes(bytes(raw))
+    got, _ = names()
+    assert sorted(got) == sorted(['DATA.MP3', 'emoji 🎵 song.mp3', 'a\ufffdb.mp3', 'thirteen1.mp3', '?CODE.MP3']), got
+
     # A directory whose chain loops, with no free entry: refused, with the FAT left as it is.
     make(per_cluster=1)
     run('mkdir', 'D')
