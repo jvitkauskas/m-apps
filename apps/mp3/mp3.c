@@ -394,6 +394,7 @@ int app_main(unsigned lsb_mhz) {
                     (unsigned)stats.frames, (unsigned)(stats.busy/1000u), (unsigned)stats.late, (unsigned)stats.most_read, (unsigned)stats.most_decode,
                     (unsigned)stats.most_draw, (unsigned)(stats.waited/1000u));
             clear_body();
+            display_text(1, WHITE, "");
         }
     }
 }

@@ -50,7 +50,8 @@ The kit links these from m-bootloader's `src/`, and `--gc-sections` drops what a
 | `platform.h` | `hal_delay_us()`, GPIO, flash, `REG()` and `hal_reset()` |
 | `usb_midi.h` | A polled USB-MIDI device on USB0 |
 | `kit/card.h` | The SD card on a modded unit, with CRCs and a clock probe |
-| `kit/fat.h` | Reading and writing FAT32 on it, in an order that survives losing power |
+| `kit/fat.h` | Reading and writing FAT32 on it, in an order that survives losing power, with long names in UTF-8 |
+| `kit/audio.h` | Sound out, polled: fill a half buffer when one comes free |
 
 There's no C library beyond `memcpy`, `memmove`, `memset`, `memcmp`, `strlen` and 32-bit division. 64-bit division doesn't link (`__divdi3`).
 
@@ -72,6 +73,7 @@ These were all seen on real units unless they say otherwise.
 - **`.bss` is cleared each time,** but only because the kit does it. `.data` holds what the last run left, unless the file was loaded again.
 - **WiFi transmit DMA needs RAM below `0x01C20000`,** according to notes in other firmware projects. We haven't tested that here.
 - **A modded unit's SD card shares SPI1 with the screen** (SPEC §11.5 for the FM-1, README's `usbdisk` for both boards). Close one before using the other.
+- **Half buffers don't warn when you're late.** The hardware repeats old samples, so a slow draw or read sounds like a buzz, with no error. Check the app's own count, and redraw the screen between card reads, as they share SPI1.
 - **SD cards have firmware quirks,** so handle an unexpected answer by restarting the card and retrying. One 32 GB card rejected a read of its last sector when it was reached by sequential reads a few ms apart, and then answered "illegal command" to everything until restarted, which took two attempts. A different card didn't do this. `kit/card.c` handles it.
 - **All zeros pass a CRC however badly they're misread,** and most of a card's first sectors are blank. So test a clock or a sampling mode on sectors that hold data. A test that read 63 of 64 sectors "cleanly" had only read blank ones, and the mode it praised was reading wrong data every time.
 - **SPI1's clock is LSB/(divider+1),** so `lsb_mhz/4-1` gives 4 MHz, not LSB/4. On an FM-1 prototype, 8 MHz works and 12 doesn't, with 430 to 510 ohms on CLK and sampling on the other clock edge doesn't help. An SMK-37 prototype reads at 16 MHz and not at 24, and settles on 12, as the driver has no step between 24 and 12: going to 16 barely changed `usbdisk`'s speed, which follows the CPU's clock instead. The driver's top step is real, though, so a card and wiring that manage it run at 24 MHz, or 20 from LSB 60. The likely limit is the read path, as the card charges the FM-1's filter capacitor C82 through 220 ohms. On the FM-1, don't lower the CLK resistor to go faster: it isolates the card from the panel's clock, and at 330 ohms, 150 ohms or none the screen went blank or distorted.
