@@ -26,6 +26,7 @@ static uint8_t fat_block[SECTOR] __attribute__((aligned(4)));
 static uint32_t fat_at, fat_cached, data_at, clusters, root, fat_sectors, info_sector, first_free;
 static unsigned per_cluster, fat_copies;
 static bool fat_dirty;
+static uint32_t cursor_start, cursor_index, cursor_cluster;
 static int freed;
 
 static bool looks_fat32(const uint8_t *b) {
@@ -65,6 +66,7 @@ const char *fat_mount(uint32_t sectors) {
     info_sector = core_le16(block+48) ? base+core_le16(block+48):0;
     fat_cached = NO_SECTOR;
     fat_dirty = false;
+    cursor_cluster = 0;
     first_free = 2;
     freed = 0;
     if (info_sector) {
@@ -232,14 +234,22 @@ bool fat_read(const struct fat_entry *file, uint32_t offset, void *to, uint32_t 
     if (offset > file->size || n > file->size-offset)
         return false;
     uint8_t *out = to;
-    uint32_t c = file->start, cluster_bytes = per_cluster*SECTOR;
+    uint32_t c = file->start, cluster_bytes = per_cluster*SECTOR, index = offset/cluster_bytes, skip = index;
     if (!cluster_ok(c))
         return !n;
-    for (uint32_t skip = offset/cluster_bytes; skip; --skip) {
+    /* Sequential reads go on from the last, as walking a long file's chain each time would get slower and slower. */
+    if (cursor_start == file->start && cursor_index <= index && cursor_cluster) {
+        c = cursor_cluster;
+        skip = index-cursor_index;
+    }
+    for (; skip; --skip) {
         c = next(c);
         if (!cluster_ok(c))
             return false;
     }
+    cursor_start = file->start;
+    cursor_index = index;
+    cursor_cluster = c;
     offset %= cluster_bytes;
     while (n) {
         uint32_t sector = data_at+(c-2)*per_cluster+offset/SECTOR;
@@ -348,6 +358,7 @@ bool fat_write(uint32_t start, uint32_t offset, const void *from, uint32_t n) {
 
 const char *fat_release(uint32_t start) {
     uint32_t c = start;
+    cursor_cluster = 0;
     /* Bounded by the volume, in case the chain loops. It stops at the first cluster already free. */
     for (uint32_t n = 0; n < clusters && cluster_ok(c); ++n) {
         if (!(n&0xfff))
