@@ -252,12 +252,13 @@ static const char *play(const struct fat_entry *file, struct stats *stats) {
         if (error)
             break;
         uint32_t b = TIMER_COUNT;
-        mp3dec_frame_info_t info;
+        /* With no frame found, as in a tag bigger than input, it only sets frame_bytes. */
+        mp3dec_frame_info_t info = {0};
         int decoded = mp3dec_decode_frame(&decoder, input, (int)have, pcm, &info);
         uint32_t c = TIMER_COUNT;
         if (!info.frame_bytes)
             break;
-        if (first)
+        if (first && info.hz)
             total_frames = frames_said(input+info.frame_offset, (unsigned)(info.frame_bytes-info.frame_offset));
         have -= (uint32_t)info.frame_bytes;
         memmove(input, input+info.frame_bytes, have);
@@ -266,7 +267,7 @@ static const char *play(const struct fat_entry *file, struct stats *stats) {
         if ((c-b)/TICKS_PER_US > stats->most_decode)
             stats->most_decode = (c-b)/TICKS_PER_US;
         app_feed();
-        if (first) {
+        if (first && info.hz) {
             first = false;
             hz = (unsigned)info.hz;
             per_frame = decoded ? (uint32_t)decoded:1152u;
@@ -290,7 +291,8 @@ static const char *play(const struct fat_entry *file, struct stats *stats) {
             /* Linear, from the last frame to this one. */
             while (position < 65536u) {
                 int32_t t = (int32_t)position;
-                put_frame(before_left+(((left-before_left)*t) >> 16), before_right+(((right-before_right)*t) >> 16), stats);
+                /* The difference can take 17 bits, so t gives up one to keep the product in 32. */
+                put_frame(before_left+(((left-before_left)*(t >> 1)) >> 15), before_right+(((right-before_right)*(t >> 1)) >> 15), stats);
                 position += step;
             }
             position -= 65536u;
