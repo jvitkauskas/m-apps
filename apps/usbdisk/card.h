@@ -14,4 +14,8 @@ void card_fast(unsigned lsb_mhz);
 void card_finish(void);
 bool card_read(uint32_t sector, uint8_t *data);
 bool card_write(uint32_t sector, const uint8_t *data);
+/* Many sectors in a row, which is much faster than one at a time. The card stays selected until the stop. */
+bool card_stream_start(uint32_t sector);
+bool card_stream_read(uint8_t *data);
+void card_stream_stop(void);
 #endif

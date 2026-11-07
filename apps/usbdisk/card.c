@@ -16,6 +16,7 @@
 static uint16_t crc_table[256];
 static bool block_addressed;
 static unsigned failures_logged, clock_mhz;
+static uint8_t probe_block[512] __attribute__((aligned(4)));
 
 static uint8_t x(uint8_t b) {
     REG(SPI1) |= BIT(14);
@@ -90,8 +91,25 @@ void card_close(void) {
     gpio_output(2, 8, true);
 }
 
+/* Wiring decides what works: one prototype with long wires manages 8 MHz but not 12. CRCs catch a clock that's too fast,
+ * so startup takes the fastest that reads cleanly, and later errors step it down. */
+static const uint8_t clocks[] = {24, 12, 8, 6, 4};
+#define CLOCKS (sizeof(clocks)/sizeof(clocks[0]))
+static unsigned clock_step;
+static bool clock_settled;
+
 void card_fast(unsigned lsb_mhz) {
-    REG(SPI1+4) = lsb_mhz/4-1;
+    /* SPI1's clock is LSB/(this+1), and this rounds down to the speed asked for. */
+    unsigned mhz = clocks[clock_step];
+    REG(SPI1+4) = (lsb_mhz+mhz-1)/mhz-1;
+}
+
+static void slow_down(void) {
+    if (clock_step+1 < CLOCKS) {
+        ++clock_step;
+        card_fast(clock_mhz);
+        app_log("card: too many errors, now %u MHz", clocks[clock_step]);
+    }
 }
 
 static void log_failure(const char *what, uint32_t sector, unsigned detail, unsigned more) {
@@ -99,6 +117,19 @@ static void log_failure(const char *what, uint32_t sector, unsigned detail, unsi
         ++failures_logged;
         app_log("card %s failed: sector %x, %x %x", what, (unsigned)sector, detail, more);
     }
+}
+
+/* Keeping the card's DI high between bytes, as it was left by the last x(0xff). */
+static void receive(uint8_t *p, unsigned n) {
+    REG(SPI1) |= BIT(14) | BIT(12);
+    REG(SPI1+0x0c) = DMA_ADDRESS(p);
+    sync_cpu();
+    REG(SPI1+0x10) = n;
+    for (unsigned i = 0; i < 400000 && !(REG(SPI1)&BIT(15)); ++i)
+        ;
+    REG(SPI1) &= ~BIT(12);
+    REG(SPI1) |= BIT(14);
+    __asm__ volatile("ssync" ::: "memory");
 }
 
 /* A block of n bytes after the command's answer, with its CRC checked. */
@@ -110,19 +141,24 @@ static bool read_block(uint8_t *p, unsigned n, uint32_t sector) {
         log_failure("token", sector, r, 0);
         return false;
     }
-    for (unsigned i = 0; i < n; ++i)
-        p[i] = x(0xff);
+    receive(p, n);
     uint16_t got = (uint16_t)(x(0xff) << 8);
     got |= x(0xff);
     uint16_t want = crc16(p, n);
-    if (got != want)
+    if (got != want) {
         log_failure("crc", sector, got, want);
+        if (clock_settled)
+            slow_down();
+    }
     return got == want;
 }
 
 static uint32_t read_size(void) {
     uint8_t csd[16];
-    bool ok = !command(9, 0) && read_block(csd, 16, 0);
+    uint8_t answer = command(9, 0);
+    if (answer)
+        log_failure("size", 0, answer, 0);
+    bool ok = !answer && read_block(csd, 16, 0);
     end_transaction();
     if (!ok)
         return 0;
@@ -195,7 +231,26 @@ uint32_t card_start(unsigned lsb_mhz) {
             c = (uint16_t)(c&0x8000 ? (uint16_t)(c << 1)^0x1021:(uint16_t)(c << 1));
         crc_table[i] = c;
     }
-    return start() ? read_size():0;
+    clock_settled = false;
+    for (clock_step = 0; clock_step < CLOCKS; ++clock_step) {
+        app_log("card: trying %u MHz", clocks[clock_step]);
+        if (!start())
+            continue;
+        uint32_t size = read_size();
+        bool clean = size != 0;
+        for (uint32_t sector = 0; sector < 32 && clean; ++sector) {
+            bool ok = !command(17, block_addressed ? sector:sector << 9) && read_block(probe_block, 512, sector);
+            end_transaction();
+            clean = ok;
+        }
+        if (clean) {
+            clock_settled = true;
+            app_log("card: %u MHz", clocks[clock_step]);
+            return size;
+        }
+    }
+    clock_step = CLOCKS-1;
+    return 0;
 }
 
 void card_finish(void) {
@@ -225,6 +280,44 @@ bool card_read(uint32_t sector, uint8_t *data) {
     return false;
 }
 
+static uint32_t stream_at;
+
+bool card_stream_start(uint32_t sector) {
+    uint8_t answer = command(18, block_addressed ? sector:sector << 9);
+    if (answer) {
+        log_failure("stream", sector, answer, 0);
+        end_transaction();
+        if (answer&0x7e)
+            start();
+        return false;
+    }
+    stream_at = sector;
+    return true;
+}
+
+bool card_stream_read(uint8_t *data) {
+    return read_block(data, 512, stream_at++);
+}
+
+void card_stream_stop(void) {
+    /* CMD12's answer comes after a stuffing byte, then the card may be busy for a while. The card stays selected. */
+    uint8_t frame[5] = {0x40|12, 0, 0, 0, 0};
+    for (unsigned i = 0; i < 5; ++i)
+        x(frame[i]);
+    x((uint8_t)(crc7(frame, 5) << 1 | 1));
+    x(0xff);
+    uint8_t r = 0xff;
+    for (unsigned i = 0; i < 16 && ((r = x(0xff))&0x80); ++i)
+        ;
+    for (unsigned i = 0; i < BUSY_WAIT && x(0xff) != 0xff; ++i)
+        ;
+    end_transaction();
+    if (r&0x7e) {
+        log_failure("stream stop", stream_at, r, 0);
+        start();
+    }
+}
+
 static bool wait_ready(void) {
     for (unsigned i = 0; i < BUSY_WAIT; ++i)
         if (x(0xff) == 0xff)
@@ -246,8 +339,10 @@ bool card_write(uint32_t sector, const uint8_t *data) {
             x((uint8_t)crc);
             uint8_t accepted = x(0xff)&0x1f;
             ok = accepted == 0x05 && wait_ready();
-            if (!ok)
+            if (!ok) {
                 log_failure("write", sector, accepted, 0);
+                slow_down();
+            }
         } else
             log_failure("write command", sector, answer, 0);
         /* The card can report a failure only after the write, so ask. */

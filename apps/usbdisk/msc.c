@@ -81,6 +81,16 @@ static uint32_t sie_read(uint32_t r) {
     return 0;
 }
 
+/* The controller's selected endpoint, so that the data path doesn't reselect it for every packet. */
+static uint32_t selected = 0xff;
+
+static void select_endpoint(uint32_t n) {
+    if (selected != n) {
+        selected = n;
+        sie_write(INDEX, n);
+    }
+}
+
 static void ep0_chunk(void) {
     uint32_t n = ep0_left > PACKET ? PACKET:ep0_left;
     for (uint32_t i = 0; i < n; ++i)
@@ -93,7 +103,7 @@ static void ep0_chunk(void) {
     bool last = !ep0_left && !(n == PACKET && zero_end);
     if (!ep0_left && n == PACKET)
         zero_end = false;
-    sie_write(INDEX, 0);
+    select_endpoint(0);
     sie_write(CSR0, last ? 0x0a:0x02);
     ep0_sending = !last;
 }
@@ -104,7 +114,7 @@ static void ep0_send(const uint8_t *data, uint32_t size, uint32_t asked) {
     ep0_data = data;
     ep0_left = size;
     zero_end = size < asked && !(size%PACKET);
-    sie_write(INDEX, 0);
+    select_endpoint(0);
     sie_write(CSR0, 0x40);
     ep0_chunk();
 }
@@ -112,7 +122,7 @@ static void ep0_send(const uint8_t *data, uint32_t size, uint32_t asked) {
 /* Ready for the next packet, which the controller's DMA will put here. */
 static void rx_arm(uint8_t *to) {
     REG(EP_RX_ADDRESS(1)) = DMA_ADDRESS(to);
-    sie_write(INDEX, 1);
+    select_endpoint(1);
     uint32_t csr = sie_read(RX_CSR1) | sie_read(RX_CSR2) << 8;
     csr = (csr&~0x164u) | 0x10u;
     sie_write(RX_CSR1, csr&0xff);
@@ -122,7 +132,7 @@ static void rx_arm(uint8_t *to) {
 static void endpoints_reset(void) {
     REG(EP1_TX_ADDRESS) = DMA_ADDRESS(reply);
     REG(EP_RX_ADDRESS(1)) = DMA_ADDRESS(command_block);
-    sie_write(INDEX, 1);
+    select_endpoint(1);
     sie_write(TX_MAX, 0xff);
     sie_write(TX_CSR1, 0x48);
     sie_write(TX_CSR2, 0);
@@ -139,19 +149,19 @@ static void ep1_configure(void) {
 }
 
 static void stall_in(void) {
-    sie_write(INDEX, 1);
+    select_endpoint(1);
     sie_write(TX_CSR1, 0x10);
     stalled_in = true;
 }
 
 static void stall_out(void) {
-    sie_write(INDEX, 1);
+    select_endpoint(1);
     sie_write(RX_CSR1, 0x20);
     stalled_out = true;
 }
 
 static void clear_halt(uint32_t endpoint) {
-    sie_write(INDEX, 1);
+    select_endpoint(1);
     if (endpoint == EP_IN) {
         sie_write(TX_CSR1, 0x48);
         stalled_in = false;
@@ -203,7 +213,7 @@ static void ep0_service(void) {
         sie_write(FADDR, pending_address);
         address_pending = false;
     }
-    sie_write(INDEX, 0);
+    select_endpoint(0);
     uint32_t csr = sie_read(CSR0);
     if (csr&0x04) {                             /* we sent a stall */
         sie_write(CSR0, 0);
@@ -282,11 +292,11 @@ static void ep0_service(void) {
     default:
         goto stall;
     }
-    sie_write(INDEX, 0);
+    select_endpoint(0);
     sie_write(CSR0, 0x48);
     return;
 stall:
-    sie_write(INDEX, 0);
+    select_endpoint(0);
     sie_write(CSR0, 0x60);
 }
 
@@ -295,6 +305,7 @@ static void bus_poll(void) {
         REG(CON0) |= BIT(12);
     uint32_t bus = sie_read(INT_USB), tx = sie_read(INT_TX1);
     if (bus&0x04) {                             /* bus reset */
+        selected = 0xff;
         sie_write(FADDR, 0);
         configuration = 0;
         ep0_sending = address_pending = needs_reset = false;
@@ -309,13 +320,16 @@ static void bus_poll(void) {
 }
 
 /* Waits for the IN endpoint to be free. False if the transfer was given up, by a reset or a lost host. */
+static uint32_t tx_status;
+
 static bool tx_wait(void) {
     for (uint32_t n = 0; !aborted && configuration; ++n) {
-        sie_write(INDEX, 1);
+        select_endpoint(1);
         uint32_t csr = sie_read(TX_CSR1);
         if (!(csr&0x01)) {
             if (csr&0x80)
                 sie_write(TX_CSR1, csr&~0x80u);
+            tx_status = csr&~0x80u;
             return true;
         }
         if ((n&15) == 15)
@@ -332,15 +346,14 @@ static bool tx_send(const uint8_t *data, uint32_t n) {
     sync_cpu();
     REG(EP1_TX_ADDRESS) = DMA_ADDRESS(data);
     REG(EP_COUNT(1)) = n;
-    sie_write(INDEX, 1);
-    sie_write(TX_CSR1, sie_read(TX_CSR1) | 0x01);
+    sie_write(TX_CSR1, tx_status | 0x01);
     return true;
 }
 
 /* Waits for a packet, and returns its size, or -1 if the transfer was given up. */
 static int rx_wait(void) {
     for (uint32_t n = 0; !aborted && configuration; ++n) {
-        sie_write(INDEX, 1);
+        select_endpoint(1);
         if (sie_read(RX_CSR1)&1) {
             uint32_t size = sie_read(RX_COUNT1) | sie_read(RX_COUNT2) << 8;
             __asm__ volatile("ssync" ::: "memory");
@@ -409,22 +422,43 @@ static bool send_reply(const uint8_t *data, uint32_t size) {
     return true;
 }
 
+/* One read at a time near the end of the card: reading ahead up to its end upsets some cards (card.c). */
+#define NEAR_THE_END 256u
+
 static void read_sectors(uint32_t first, uint32_t count) {
-    for (uint32_t s = 0; s < count; ++s) {
+    bool stream = count > 1 && total_sectors-(first+count) >= NEAR_THE_END && card_stream_start(first);
+    bool failed = false;
+    for (uint32_t s = 0; s < count && !failed; ++s) {
         /* The last packet may still be going out of this buffer. */
-        if (!tx_wait())
+        if (!tx_wait()) {
+            if (stream)
+                card_stream_stop();
             return;
-        if (!card_read(first+s, sector)) {
+        }
+        if (stream && !card_stream_read(sector)) {
+            card_stream_stop();
+            stream = false;
+            if (!card_read(first+s, sector))
+                failed = true;
+        } else if (!stream && !card_read(first+s, sector))
+            failed = true;
+        if (failed) {
             fail(3, 0x11);
             break;
         }
         ++stats.sectors_read;
         for (uint32_t at = 0; at < SECTOR; at += PACKET)
-            if (!tx_send(sector+at, PACKET))
+            if (!tx_send(sector+at, PACKET)) {
+                if (stream)
+                    card_stream_stop();
                 return;
+            }
         moved += SECTOR;
-        app_feed();
+        if (!(s&31))
+            app_feed();
     }
+    if (stream)
+        card_stream_stop();
     finish_in(PACKET);
 }
 
@@ -608,7 +642,7 @@ void msc_poll(void) {
     bus_poll();
     if (!configuration || needs_reset)
         return;
-    sie_write(INDEX, 1);
+    select_endpoint(1);
     if (!(sie_read(RX_CSR1)&1))
         return;
     uint32_t size = sie_read(RX_COUNT1) | sie_read(RX_COUNT2) << 8;
