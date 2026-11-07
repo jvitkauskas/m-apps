@@ -103,24 +103,32 @@ void card_close(void) {
     gpio_output(DO_PORT, DO_PIN, true);
 }
 
-/* Wiring decides what works: an FM-1 prototype with long wires managed 8 MHz but not 12, and an SMK-37 12 but not 24. CRCs catch a clock that's too fast,
- * so startup takes the fastest that reads cleanly, and later errors step it down. */
-static const uint8_t clocks[] = {24, 12, 8, 6, 4};
+/* Wiring decides what works: an FM-1 prototype with long wires managed 8 MHz but not 12, and an SMK-37 16 but not 24.
+ * CRCs catch a clock that's too fast, so startup takes the fastest that reads cleanly, and later errors step it down. */
+static const uint8_t clocks[] = {24, 16, 12, 8, 6, 4};
 #define CLOCKS (sizeof(clocks)/sizeof(clocks[0]))
 static unsigned clock_step;
 static bool clock_settled;
 
-void card_fast(unsigned lsb_mhz) {
-    /* SPI1's clock is LSB/(this+1), and this rounds down to the speed asked for. */
+/* SPI1's clock is LSB/(baud+1). This divides LSB by enough to stay at or below a step, so 16 gives 15 MHz from LSB 60. */
+static unsigned divider(unsigned lsb_mhz) {
     unsigned mhz = clocks[clock_step];
-    REG(SPI1+4) = (lsb_mhz+mhz-1)/mhz-1;
+    return (lsb_mhz+mhz-1)/mhz;
+}
+
+void card_fast(unsigned lsb_mhz) {
+    REG(SPI1+4) = divider(lsb_mhz)-1;
+}
+
+static unsigned real_mhz(void) {
+    return clock_mhz/divider(clock_mhz);
 }
 
 static void slow_down(void) {
     if (clock_step+1 < CLOCKS) {
         ++clock_step;
         card_fast(clock_mhz);
-        app_log("card: too many errors, now %u MHz", clocks[clock_step]);
+        app_log("card: too many errors, now %u MHz", real_mhz());
     }
 }
 
@@ -297,13 +305,13 @@ uint32_t card_start(unsigned lsb_mhz) {
     }
     clock_settled = false;
     for (clock_step = 0; clock_step < CLOCKS; ++clock_step) {
-        app_log("card: trying %u MHz", clocks[clock_step]);
+        app_log("card: trying %u MHz", real_mhz());
         if (!start())
             continue;
         uint32_t size = read_size();
         if (size && probe_reads(size)) {
             clock_settled = true;
-            app_log("card: %u MHz", clocks[clock_step]);
+            app_log("card: %u MHz", real_mhz());
             return size;
         }
     }
