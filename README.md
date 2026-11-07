@@ -101,7 +101,12 @@ make run APP=usbdisk BOARD=fm1 RUN_FLAGS="--timeout 3600" M_FLASHER="sudo m-flas
 
 **To leave,** eject the disk on the computer, which is the way to use normally, or press PLAY, which doesn't wait for the computer to finish, so eject first if you can. With no computer attached, it also leaves after 2 minutes. It doesn't leave just because the disk is idle, as a computer can hold writes back for a while.
 
-A write has reached the card before the computer is told it succeeded, and data is checked by CRC in both directions. It's a simple driver for now, at about 270 KB/s reading and 220 KB/s writing started over MIDI, and a little slower from `run-ram`. So it suits small files, not filling a card.
+A write has reached the card before the computer is told it succeeded, and data is checked by CRC in both directions. It picks the fastest card clock that reads cleanly, from 24 MHz down to 4. On a prototype with long wires that's 8 MHz, giving about 440 KB/s reading and 190 KB/s writing from `run-ram`. So it suits small files, not filling a card.
+
+**On macOS:**
+- Mounting takes about 18 s on a 32 GB card with 16 KiB clusters, and macOS gives up at 20 s (`ETIMEDOUT`). It seems to read the whole FAT, so a larger FAT or a slower clock can fail to mount.
+- Spotlight can hold the disk for a while, so Eject may be refused at first. It took 38 s in testing. The app ends once the eject goes through.
+- macOS adds its own hidden `.Spotlight-V100` and `.fseventsd` folders to the card.
 
 ## License
 
