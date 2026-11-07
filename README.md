@@ -8,7 +8,7 @@ An app is one file. The same file can be started from an SD card, over MIDI, or 
 
 - **`run-ram`:** `make run` below uses this. The address needs an M-Flasher newer than 0.9.1, which isn't released yet.
 - **MIDI:** m-bootloader 2.2's MIDI mode and RAM stage can load and run an app, but nothing public sends one yet. M-Flasher's page has no button for it.
-- **SD card:** `picker` below lists the apps on a card and starts one. The bootloader's `SD CARD` item starts it on the FM-1, but it hasn't run that way yet, and the SMK-37's bootloader has no such item, so there it runs from `run-ram`.
+- **SD card:** `picker` below lists the apps on a card and starts one, from the bootloader's `SD CARD` item. That has run on an SMK-37, with [m-bootloader #22](https://github.com/jvitkauskas/m-bootloader/pull/22), which isn't released yet. It hasn't run on an FM-1.
 
 Writing apps with an agent? Start with [AGENTS.md](AGENTS.md), which has the loop, the rules and the traps found so far.
 
@@ -113,6 +113,7 @@ sudo m-flasher run-ram build/smk37/MENU.BIN --addr 0x01C28000
 - **Names:** it reads 8.3 names only. A longer name shows as its short form, such as `LONGFI 1` for `LONGFILENAME.APP`, as the screen has no `~`.
 - **Checks:** before loading, it checks the file's trailer and refuses another board's app with `OTHER BOARD`. After loading, it checks the CRC. Whatever's refused stays in the list with the reason shown.
 - **Returning:** an app that returns comes back to the list, which is read again, as the app may have changed the card. A non-zero result shows as `RETURNED 7`. It shows the first 100 apps by name.
+- **Size:** it refuses a file over `0x4F000` bytes, the most the kit can build, as the log starts where that ends.
 
 ### usbdisk
 

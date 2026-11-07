@@ -61,10 +61,14 @@ int main(int argc, char **argv) {
         for (unsigned i = 0; i < count; ++i)
             if (!memcmp(apps[i].name, argv[3], strlen(argv[3]))) {
                 uint8_t *to = malloc(BUFFER);
+                if (!to)
+                    return 2;
                 memset(to, 0xa5, BUFFER);
                 const char *result = app_file_load(&apps[i], to, (unsigned)atoi(argv[2]));
                 printf("load %s\n", result ? result:"ok");
                 FILE *out = fopen(argv[4], "wb");
+                if (!out)
+                    return 2;
                 fwrite(to, 1, BUFFER, out);
                 fclose(out);
                 free(to);

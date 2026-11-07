@@ -241,9 +241,16 @@ with tempfile.TemporaryDirectory() as folder:
     refused(b'short', 'NOT AN APP FILE')
     refused(good[:100]+b'!'+good[101:], 'APP FILE DAMAGED')
     refused(app(b'g'*0x50000), 'APP TOO BIG')
+    # The largest that loads ends where the log starts.
+    refused(app(b'g'*(0x4f000-8+1)), 'APP TOO BIG')
+    code = app(bytes((i*3) & 255 for i in range(0x4f000-8)))
+    card, apps = standard()
+    card.write_file(apps, 'MOST', 'APP', code)
+    assert run(card.build(mbr=False), 'MOST')[-1] == 'load ok'
+    loaded(code)
     # A file that claims more than its chain holds.
     refused(good, 'CARD READ ERROR', size=len(good)+SECTOR*4)
-    refused(good, 'CARD READ ERROR', size=0x7fffffff)
+    refused(good, 'APP TOO BIG', size=0x7fffffff)
     # A chain that leaves the volume, and one that loops: the size limits how far it goes.
     card, apps = standard()
     clusters = card.write_file(apps, 'OUT', 'APP', app(b'o'*3000))
