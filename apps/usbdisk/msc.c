@@ -436,21 +436,30 @@ static bool send_sector(const uint8_t *data) {
     return true;
 }
 
+static void read_singly(uint32_t first, uint32_t count) {
+    for (uint32_t s = 0; s < count; ++s) {
+        /* The last packet may still be going out of this buffer. */
+        if (!tx_wait())
+            return;
+        if (!card_read(first+s, sector)) {
+            fail(3, 0x11);
+            break;
+        }
+        ++stats.sectors_read;
+        if (!send_sector(sector))
+            return;
+        moved += SECTOR;
+        app_feed();
+    }
+    finish_in(PACKET);
+}
+
 /* The card and USB can work at once, so while one sector goes out, DMA fetches the next into the other buffer. */
 static void read_stream(uint32_t first, uint32_t count) {
     uint8_t *out = sector, *next = sector2;
     if (!card_stream_begin(out) || !card_stream_finish(out)) {
         card_stream_stop();
-        if (!card_read(first, out)) {
-            fail(3, 0x11);
-            return;
-        }
-        /* One sector, then a stall: the host asks again for the rest. */
-        ++stats.sectors_read;
-        if (send_sector(out)) {
-            moved = SECTOR;
-            finish_in(PACKET);
-        }
+        read_singly(first, count);
         return;
     }
     bool streaming = true;
@@ -500,25 +509,10 @@ static void read_stream(uint32_t first, uint32_t count) {
 }
 
 static void read_sectors(uint32_t first, uint32_t count) {
-    if (count > 1 && total_sectors-(first+count) >= NEAR_THE_END && card_stream_start(first)) {
+    if (count > 1 && total_sectors-(first+count) >= NEAR_THE_END && card_stream_start(first))
         read_stream(first, count);
-        return;
-    }
-    for (uint32_t s = 0; s < count; ++s) {
-        /* The last packet may still be going out of this buffer. */
-        if (!tx_wait())
-            return;
-        if (!card_read(first+s, sector)) {
-            fail(3, 0x11);
-            break;
-        }
-        ++stats.sectors_read;
-        if (!send_sector(sector))
-            return;
-        moved += SECTOR;
-        app_feed();
-    }
-    finish_in(PACKET);
+    else
+        read_singly(first, count);
 }
 
 /* A sector from the host. False, having dealt with it, if it won't come. */
@@ -569,8 +563,12 @@ static void write_stream(uint32_t first, uint32_t count) {
         if (pending) {
             pending = false;
             if (!card_write_stream_finish()) {
-                /* It still has this sector, and the single write retries it and restarts the card. */
-                card_write_stream_stop();
+                /* A failed stop leaves the stream's earlier sectors unconfirmed, and they're gone from here, so the host
+                 * has to hear about it and write them again. Otherwise this one can be retried, as it's still here. */
+                if (!card_write_stream_stop()) {
+                    write_failed();
+                    return;
+                }
                 if (!card_write(first+s-1, out)) {
                     write_failed();
                     return;
