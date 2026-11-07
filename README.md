@@ -134,7 +134,7 @@ make run APP=usbdisk BOARD=smk37 RUN_FLAGS="--timeout 3600" M_FLASHER="sudo m-fl
 
 **To leave,** eject the disk on the computer, which is the way to use normally, or press PLAY (SEQ PLAY on the SMK-37), which doesn't wait for the computer to finish, so eject first if you can. With no computer attached, it also leaves after 2 minutes. It doesn't leave just because the disk is idle, as a computer can hold writes back for a while.
 
-A write has reached the card before the computer is told it succeeded, and data is checked by CRC in both directions. It picks the fastest card clock that reads cleanly, from 24 MHz down to 4, and the app's log says which. From `run-ram`, an FM-1 prototype with long wires settled on 8 MHz, at about 750 KB/s reading and 440 KB/s writing. An SMK-37 settled on 16 MHz, at about 880 KB/s reading and 440 KB/s writing, and on 15 MHz from the bootloader, at about 1,100 KB/s and 820 KB/s. USB 1.1 limits it to around 1 MB/s whatever the clock.
+A write has reached the card before the computer is told it succeeded, and data is checked by CRC in both directions. It picks the fastest card clock that reads cleanly, from 24 MHz down to 4, and the app's log says which. From `run-ram`, an FM-1 prototype with long wires settled on 8 MHz, at about 750 KB/s reading and 440 KB/s writing. An SMK-37 settled on 12 MHz, at about 870 KB/s reading and 440 KB/s writing, and about 1,100 KB/s and 820 KB/s from the bootloader. USB 1.1 limits it to around 1 MB/s whatever the clock.
 
 **On macOS:**
 - macOS gives up on mounting after 20 s (`ETIMEDOUT`), and it seems to read the whole FAT in that time. That's about 10 s on a 32 GB card with 16 KiB clusters. A larger FAT or a slower clock could fail to mount.

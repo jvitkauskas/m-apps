@@ -104,13 +104,14 @@ void card_close(void) {
 }
 
 /* Wiring decides what works: an FM-1 prototype with long wires managed 8 MHz but not 12, and an SMK-37 16 but not 24.
- * CRCs catch a clock that's too fast, so startup takes the fastest that reads cleanly, and later errors step it down. */
-static const uint8_t clocks[] = {24, 16, 12, 8, 6, 4};
+ * CRCs catch a clock that's too fast, so startup takes the fastest that reads cleanly, and later errors step it down.
+ * There's no step at 16, as it didn't make usbdisk faster, and it would run closer to where a card fails. */
+static const uint8_t clocks[] = {24, 12, 8, 6, 4};
 #define CLOCKS (sizeof(clocks)/sizeof(clocks[0]))
 static unsigned clock_step;
 static bool clock_settled;
 
-/* SPI1's clock is LSB/(baud+1). This divides LSB by enough to stay at or below a step, so 16 gives 15 MHz from LSB 60. */
+/* SPI1's clock is LSB/(baud+1). This divides LSB by enough to stay at or below a step, so 24 gives 20 MHz from LSB 60. */
 static unsigned divider(unsigned lsb_mhz) {
     unsigned mhz = clocks[clock_step];
     return (lsb_mhz+mhz-1)/mhz;
