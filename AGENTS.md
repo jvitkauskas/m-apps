@@ -27,7 +27,7 @@ To check a change really works, run it. A clean build proves little here, as mos
 ## Rules
 
 - **Don't write flash unless that's the job, and the owner has agreed to it.** RAM apps can't hurt a unit by themselves: switching it off and on brings it back. A bad flash write can leave a unit needing a USB_KEY dongle to recover. Never write the boot area, `0x0000`–`0x3FFF`.
-- **Turn the guard off around flash writes,** with `app_guard(false)`, so a watchdog reset can't cut one short. Afterwards the app must reset, not return.
+- **Turn the guard off around flash writes,** with `app_guard(false)`, so a watchdog reset can't cut one short. Afterwards the app must reset, not return. `slots` keeps it on, as it feeds it each sector and can recover from a stopped write.
 - **Stay polled.** Interrupts are off when `app_main` starts, and version 1 of the format is polled. An app that turns them on must reset rather than return.
 - **Stay in the allowed RAM if the app returns:**
   - The file, `.bss` and stacks have to end by `0x01C7F000`. The linker checks this.
@@ -50,6 +50,7 @@ The kit links these from m-bootloader's `src/`, and `--gc-sections` drops what a
 | `platform.h` | `hal_delay_us()`, GPIO, flash, `REG()` and `hal_reset()` |
 | `usb_midi.h` | A polled USB-MIDI device on USB0 |
 | `kit/card.h` | The SD card on a modded unit, with CRCs and a clock probe |
+| `kit/fat.h` | Reading and writing FAT32 on it, in an order that survives losing power |
 
 There's no C library beyond `memcpy`, `memmove`, `memset`, `memcmp`, `strlen` and 32-bit division. 64-bit division doesn't link (`__divdi3`).
 
