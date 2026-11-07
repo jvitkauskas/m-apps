@@ -76,8 +76,10 @@ static bool hold_to_confirm(const char *title) {
         display_progress(n*100/HOLD_POLLS, GREEN);
     }
     display_text(7, GREEN, "RELEASE THE KEY");
-    while (board_keys())
+    while (board_keys()) {
         hal_delay_us(POLL_US);
+        app_feed();
+    }
     return true;
 }
 

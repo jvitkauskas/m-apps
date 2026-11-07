@@ -114,6 +114,40 @@ with tempfile.TemporaryDirectory() as folder:
     assert get('D', 'AGAIN.BIN') == b'again'
     fsck()
 
+    # A directory whose chain loops, with no free entry: refused, with the FAT left as it is.
+    make(per_cluster=1)
+    run('mkdir', 'D')
+    for i in range(20):
+        new('D', f'L{i}.BIN', b'x')
+    raw = bytearray(image.read_bytes())
+    reserved, fats, fat_size, root = int.from_bytes(raw[14:16], 'little'), raw[16], int.from_bytes(raw[36:40], 'little'), int.from_bytes(raw[44:48], 'little')
+    fat_at, data_at = reserved*512, (reserved+fats*fat_size)*512
+    entry = lambda c: int.from_bytes(raw[fat_at+c*4:fat_at+c*4+4], 'little')&0x0fffffff
+    at = data_at+(root-2)*512
+    while raw[at:at+11] != b'D          ':
+        at += 32
+    first = int.from_bytes(raw[at+26:at+28], 'little') | int.from_bytes(raw[at+20:at+22], 'little') << 16
+    second = entry(first)
+    assert 2 <= second < 0x0ffffff8 and entry(second) >= 0x0ffffff8, 'the folder should end in its second cluster'
+    # Both clusters full, then the second points back at the first.
+    for c in (first, second):
+        for e in range(16):
+            place = data_at+(c-2)*512+e*32
+            if raw[place] in (0, 0xe5):
+                raw[place:place+32] = b'Z%03d%04d' % (c % 1000, e)+b'TXT '+bytes(20)
+    for copy in range(fats):
+        place = fat_at+copy*fat_size*512+second*4
+        raw[place:place+4] = first.to_bytes(4, 'little')
+    image.write_bytes(bytes(raw))
+    answer = run('new', 'D', 'NEW.BIN', data, expect=3)
+    assert answer == 'error BAD FOLDER ON CARD', answer
+    written = bytearray(image.read_bytes())
+    for copy in range(fats):
+        place = fat_at+copy*fat_size*512
+        assert written[place+second*4:place+second*4+4] == first.to_bytes(4, 'little'), 'the chain was changed'
+        assert written[place+first*4:place+first*4+4] == raw[place+first*4:place+first*4+4], 'the chain was changed'
+    assert written[data_at+(first-2)*512:data_at+(first-1)*512] == raw[data_at+(first-2)*512:data_at+(first-1)*512]
+
     # Free space in pieces: a file across the gaps.
     make(per_cluster=1)
     run('mkdir', 'D')

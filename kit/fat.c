@@ -292,7 +292,10 @@ const char *fat_reserve(uint32_t size, uint32_t *start) {
         return CARD_FULL;
     uint32_t first = 0, last = 0;
     c = first_free;
+    uint32_t looked = 0;
     for (found = 0; found < need; ) {
+        if (!(looked++&0xfff))
+            app_feed();
         uint32_t value = next(c);
         if (!value && fat_cached != fat_at+c/FAT_PER_SECTOR)
             return READ_ERROR;
@@ -347,6 +350,8 @@ const char *fat_release(uint32_t start) {
     uint32_t c = start;
     /* Bounded by the volume, in case the chain loops. It stops at the first cluster already free. */
     for (uint32_t n = 0; n < clusters && cluster_ok(c); ++n) {
+        if (!(n&0xfff))
+            app_feed();
         uint32_t following = next(c);
         if (!following)
             break;
@@ -384,13 +389,17 @@ static const char *blank_cluster(uint32_t c) {
 const char *fat_add(uint32_t directory, const char name[11], unsigned attributes, uint32_t start, uint32_t size) {
     if (!cluster_ok(directory))
         return BAD_FOLDER;
-    uint32_t c = directory;
-    for (uint32_t n = 0; n < clusters; ++n) {
+    uint32_t c = directory, seen = 0;
+    for (;;) {
+        app_feed();
         for (unsigned s = 0; s < per_cluster; ++s) {
             uint32_t sector = data_at+(c-2)*per_cluster+s;
             if (!card_read(sector, block))
                 return READ_ERROR;
             for (unsigned at = 0; at < SECTOR; at += ENTRY) {
+                /* As walk() does, so a chain that loops ends with an error, and its FAT stays as it is. */
+                if (++seen > MOST_ENTRIES)
+                    return BAD_FOLDER;
                 if (block[at] && block[at] != 0xe5)
                     continue;
                 /* A zero entry ends the directory, so what follows it may never have been looked at. */

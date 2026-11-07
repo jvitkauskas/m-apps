@@ -127,7 +127,7 @@ A slot is `/MBOOT/SLOTS/<8 hex digits>/NAME.BIN`, in a folder named from the uni
 - **It saves first.** Before writing, what's on the unit goes over the slot it came from, or into a new slot if it's other firmware, or if the slot being loaded is the one it came from. If a slot already holds it, nothing is saved. If there's no room, it stops with nothing erased.
 - **If the power goes,** switch on again. With no valid firmware, the bootloader's menu opens by itself, showing `APP NOT FOUND`. Choose `SD CARD`, then `SLOTS`, and it shows `LAST LOAD STOPPED` with that slot selected. What isn't valid firmware is never saved, so the slot stays good. Load it again.
 
-The card is written in an order where losing power leaves, at worst, clusters no file uses, which `fsck` can reclaim. The guard stays on while flash is written, unlike what the rule below says for other apps, as each sector feeds it. So only a real hang reaches it, and then the unit ends in download mode.
+The card is written in an order where losing power leaves, at worst, clusters no file uses, which `fsck` can reclaim. The guard stays on while flash is written, unlike what `AGENTS.md` says for other apps, as each sector feeds it. So only a real hang reaches it, and then the unit ends in download mode.
 
 ### usbdisk
 

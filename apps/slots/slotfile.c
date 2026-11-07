@@ -161,6 +161,7 @@ static const char *same_as_flash(const struct fat_entry *file, bool *same) {
     for (uint32_t at = FIRST; at < END; at += SECTOR) {
         if (kept(at))
             continue;
+        app_feed();
         if (!fat_read(file, at, file_data, SECTOR))
             return READ_ERROR;
         if (!flash_read(0, at, flash_data, SECTOR))
@@ -202,6 +203,7 @@ static const char *copy_flash(struct slots *s, uint32_t *start) {
     for (uint32_t at = 0; at < SLOT_SIZE && !error; at += SECTOR) {
         if (!(at/SECTOR%PROGRESS_EVERY) && s->progress)
             s->progress("CHECKING", at/SECTOR, SLOT_SIZE/SECTOR);
+        app_feed();
         if (!fat_read(&copy, at, file_data, SECTOR))
             error = READ_ERROR;
         else if (!flash_read(0, at, flash_data, SECTOR))
@@ -245,10 +247,14 @@ const char *slots_save_new(struct slots *s, char name[8]) {
     free_name(s, name);
     file_name(full, name);
     error = fat_add(s->folder, full, FAT_ATTR_ARCHIVE, start, SLOT_SIZE);
-    if (!error) {
-        memcpy(s->active, name, 8);
-        error = write_state(s);
+    if (error) {
+        /* Nothing names it, so it would only be lost. */
+        fat_release(start);
+        fat_commit();
+        return error;
     }
+    memcpy(s->active, name, 8);
+    error = write_state(s);
     if (!error)
         error = fat_commit();
     return error ? error:refresh(s);
@@ -332,6 +338,7 @@ const char *slots_load(struct slots *s, unsigned index) {
     for (uint32_t at = FIRST; at < END && !any; at += SECTOR) {
         if (kept(at))
             continue;
+        app_feed();
         if (!fat_read(&file, at, file_data, SECTOR))
             return READ_ERROR;
         if (!flash_read(0, at, flash_data, SECTOR))
