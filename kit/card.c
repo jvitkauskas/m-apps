@@ -121,15 +121,16 @@ void card_fast(unsigned lsb_mhz) {
     REG(SPI1+4) = divider(lsb_mhz)-1;
 }
 
-static unsigned real_mhz(void) {
-    return clock_mhz/divider(clock_mhz);
+/* In kHz, as 60/8 is 7.5 MHz. */
+static unsigned real_khz(void) {
+    return clock_mhz*1000/divider(clock_mhz);
 }
 
 static void slow_down(void) {
     if (clock_step+1 < CLOCKS) {
         ++clock_step;
         card_fast(clock_mhz);
-        app_log("card: too many errors, now %u MHz", real_mhz());
+        app_log("card: too many errors, now %u kHz", real_khz());
     }
 }
 
@@ -306,13 +307,13 @@ uint32_t card_start(unsigned lsb_mhz) {
     }
     clock_settled = false;
     for (clock_step = 0; clock_step < CLOCKS; ++clock_step) {
-        app_log("card: trying %u MHz", real_mhz());
+        app_log("card: trying %u kHz", real_khz());
         if (!start())
             continue;
         uint32_t size = read_size();
         if (size && probe_reads(size)) {
             clock_settled = true;
-            app_log("card: %u MHz", real_mhz());
+            app_log("card: %u kHz", real_khz());
             return size;
         }
     }
