@@ -249,12 +249,16 @@ static uint32_t probe_le32(unsigned at) {
 
 /* Whether this clock reads cleanly. Blank sectors prove nothing, as all zeros pass a CRC however they're misread, and
  * most of a card's first sectors are blank. So this reads what's likely to hold data: the partition table, the first
- * partition's boot sector, and the start of its FAT. */
+ * partition's boot sector, and the start of its FAT. A card with no filesystem must still pass, so it can be formatted,
+ * and these reads are then just more checked data. */
 static bool probe_reads(uint32_t size) {
     if (!probe_read(0))
         return false;
     uint32_t partition = probe_block[510] == 0x55 && probe_block[511] == 0xaa && probe_block[450] ? probe_le32(454):0;
-    if (partition >= size || !probe_read(partition))
+    /* Without a partition table, those bytes mean nothing, and sector 0 may be the boot sector itself. */
+    if (partition >= size)
+        partition = 0;
+    if (!probe_read(partition))
         return false;
     uint32_t reserved = probe_block[14] | (uint32_t)probe_block[15] << 8;
     unsigned with_data = 0;
@@ -267,7 +271,7 @@ static bool probe_reads(uint32_t size) {
                 break;
             }
     }
-    app_log("card: %u of 16 FAT sectors held data", with_data);
+    app_log("card: %u of 16 test sectors held data", with_data);
     return true;
 }
 
