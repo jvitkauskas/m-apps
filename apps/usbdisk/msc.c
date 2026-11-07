@@ -46,6 +46,7 @@ static const uint8_t inquiry[36] = {
 static uint8_t ep0[PACKET+4] __attribute__((aligned(4)));
 static uint8_t command_block[PACKET+4] __attribute__((aligned(4)));
 static uint8_t sector[SECTOR+4] __attribute__((aligned(4)));
+static uint8_t sector2[SECTOR+4] __attribute__((aligned(4)));
 static uint8_t reply[32] __attribute__((aligned(4)));
 static uint8_t status_block[13] __attribute__((aligned(4)));
 static uint8_t string_descriptor[2+2*26];
@@ -323,6 +324,9 @@ static void bus_poll(void) {
 static uint32_t tx_status;
 
 static bool tx_wait(void) {
+    /* Sending would clear a stall the host hasn't. */
+    if (stalled_in)
+        return false;
     for (uint32_t n = 0; !aborted && configuration; ++n) {
         select_endpoint(1);
         uint32_t csr = sie_read(TX_CSR1);
@@ -425,66 +429,188 @@ static bool send_reply(const uint8_t *data, uint32_t size) {
 /* One read at a time near the end of the card: reading ahead up to its end upsets some cards (card.c). */
 #define NEAR_THE_END 256u
 
-static void read_sectors(uint32_t first, uint32_t count) {
-    bool stream = count > 1 && total_sectors-(first+count) >= NEAR_THE_END && card_stream_start(first);
-    bool failed = false;
-    for (uint32_t s = 0; s < count && !failed; ++s) {
+static bool send_sector(const uint8_t *data) {
+    for (uint32_t at = 0; at < SECTOR; at += PACKET)
+        if (!tx_send(data+at, PACKET))
+            return false;
+    return true;
+}
+
+static void read_singly(uint32_t first, uint32_t count) {
+    for (uint32_t s = 0; s < count; ++s) {
         /* The last packet may still be going out of this buffer. */
-        if (!tx_wait()) {
-            if (stream)
-                card_stream_stop();
+        if (!tx_wait())
             return;
-        }
-        if (stream && !card_stream_read(sector)) {
-            card_stream_stop();
-            stream = false;
-            if (!card_read(first+s, sector))
-                failed = true;
-        } else if (!stream && !card_read(first+s, sector))
-            failed = true;
-        if (failed) {
+        if (!card_read(first+s, sector)) {
             fail(3, 0x11);
             break;
         }
         ++stats.sectors_read;
-        for (uint32_t at = 0; at < SECTOR; at += PACKET)
-            if (!tx_send(sector+at, PACKET)) {
-                if (stream)
-                    card_stream_stop();
-                return;
-            }
+        if (!send_sector(sector))
+            return;
         moved += SECTOR;
-        if (!(s&31))
-            app_feed();
+        app_feed();
     }
-    if (stream)
+    finish_in(PACKET);
+}
+
+/* The card and USB can work at once, so while one sector goes out, DMA fetches the next into the other buffer. */
+static void read_stream(uint32_t first, uint32_t count) {
+    uint8_t *out = sector, *next = sector2;
+    if (!card_stream_begin(out) || !card_stream_finish(out)) {
+        card_stream_stop();
+        read_singly(first, count);
+        return;
+    }
+    bool streaming = true;
+    for (uint32_t s = 0; s < count; ++s) {
+        bool more = s+1 < count;
+        /* The last packet may still be going out of the buffer this overwrites. */
+        if (!tx_wait()) {
+            if (streaming)
+                card_stream_stop();
+            return;
+        }
+        bool started = false;
+        if (more && streaming) {
+            started = card_stream_begin(next);
+            if (!started) {
+                card_stream_stop();
+                streaming = false;
+            }
+        }
+        ++stats.sectors_read;
+        bool sent = send_sector(out);
+        bool good = true;
+        if (started && !card_stream_finish(next)) {
+            good = false;
+            card_stream_stop();
+            streaming = false;
+        }
+        if (!sent) {
+            if (streaming)
+                card_stream_stop();
+            return;
+        }
+        moved += SECTOR;
+        app_feed();
+        if (more && (!started || !good) && !card_read(first+s+1, next)) {
+            fail(3, 0x11);
+            finish_in(PACKET);
+            return;
+        }
+        uint8_t *swap = out;
+        out = next;
+        next = swap;
+    }
+    if (streaming)
         card_stream_stop();
     finish_in(PACKET);
 }
 
-static void write_sectors(uint32_t first, uint32_t count) {
-    for (uint32_t s = 0; s < count; ++s) {
-        for (uint32_t at = 0; at < SECTOR; ) {
-            rx_arm(sector+at);
-            int got = rx_wait();
-            if (got < 0)
-                return;
-            at += (uint32_t)got;
-            moved += (uint32_t)got;
-            if (!got || (uint32_t)got < PACKET) {
-                fail(5, 0x24);                  /* a short packet inside a sector */
-                stall_out();
-                return;
-            }
-        }
-        if (!card_write(first+s, sector)) {
-            fail(3, 0x0c);
+static void read_sectors(uint32_t first, uint32_t count) {
+    if (count > 1 && total_sectors-(first+count) >= NEAR_THE_END && card_stream_start(first))
+        read_stream(first, count);
+    else
+        read_singly(first, count);
+}
+
+/* A sector from the host. False, having dealt with it, if it won't come. */
+static bool receive_sector(uint8_t *to) {
+    for (uint32_t at = 0; at < SECTOR; ) {
+        rx_arm(to+at);
+        int got = rx_wait();
+        if (got < 0)
+            return false;
+        at += (uint32_t)got;
+        moved += (uint32_t)got;
+        if ((uint32_t)got < PACKET) {
+            fail(5, 0x24);                      /* a short packet inside a sector */
             stall_out();
+            return false;
+        }
+    }
+    return true;
+}
+
+static void write_failed(void) {
+    fail(3, 0x0c);
+    /* With all the data in, the host has nothing to send, so it wouldn't find a stall and clear it. After a reset, the
+     * command is gone, and a stall would only get in the next one's way. */
+    if (moved < expected && !aborted)
+        stall_out();
+}
+
+static void write_singly(uint32_t first, uint32_t count) {
+    for (uint32_t s = 0; s < count; ++s) {
+        if (!receive_sector(sector))
+            return;
+        if (!card_write(first+s, sector)) {
+            write_failed();
             return;
         }
         ++stats.sectors_written;
         app_feed();
     }
+}
+
+/* While one sector goes to the card, DMA receives the next. The host only hears of success after the card's status. */
+static void write_stream(uint32_t first, uint32_t count) {
+    uint8_t *in = sector, *out = sector2;
+    bool pending = false;
+    uint32_t s = 0;
+    for (; s < count; ++s) {
+        bool got = receive_sector(in);
+        if (pending) {
+            pending = false;
+            if (!card_write_stream_finish()) {
+                /* A failed stop leaves the stream's earlier sectors unconfirmed, and they're gone from here, so the host
+                 * has to hear about it and write them again. Otherwise this one can be retried, as it's still here. */
+                if (!card_write_stream_stop()) {
+                    write_failed();
+                    return;
+                }
+                if (!card_write(first+s-1, out)) {
+                    write_failed();
+                    return;
+                }
+                ++stats.sectors_written;
+                if (got && !card_write(first+s, in)) {
+                    write_failed();
+                    return;
+                }
+                if (got) {
+                    ++stats.sectors_written;
+                    write_singly(first+s+1, count-s-1);
+                }
+                return;
+            }
+            ++stats.sectors_written;
+        }
+        if (!got) {
+            if (!card_write_stream_stop() && !sense_key)
+                write_failed();
+            return;
+        }
+        card_write_stream_begin(in);
+        pending = true;
+        uint8_t *swap = in;
+        in = out;
+        out = swap;
+        app_feed();
+    }
+    bool last = card_write_stream_finish();
+    if (last)
+        ++stats.sectors_written;
+    if (!card_write_stream_stop() || !last)
+        write_failed();
+}
+
+static void write_sectors(uint32_t first, uint32_t count) {
+    if (count > 1 && total_sectors-(first+count) >= NEAR_THE_END && card_write_stream_start(first))
+        write_stream(first, count);
+    else
+        write_singly(first, count);
 }
 
 static void no_data_expected(void) {
