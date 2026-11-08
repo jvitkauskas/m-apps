@@ -91,7 +91,7 @@ int app_main(unsigned lsb_mhz) {
 - `APP_BOARD` is 1 on the FM-1 and 2 on the SMK-37, and each board gets its own build.
 - An app needing a larger stack sets `<name>_STACK := 0x8000` in the `Makefile`. The default is 16 KiB.
 - The card driver is `kit/card.h`, for a unit with a card mod.
-- `META.TXT` beside the app's source is what the card's launcher shows for it (see `picker` below), and `ICON.QOI` its icon, if it has one. `make card` puts them in the app's folder.
+- `META.TXT` beside the app's source is what the card's launcher shows for it (see `picker` below), and `ICON.QOI` its icon, if it has one, made from `icon.png` with `tools/icon.py`. `make card` puts them in the app's folder.
 - Started by the launcher, `app_folder()` is the app's folder on the card, for its own files: mount the card, then `fat_find(app_folder(), "SONGS   DAT", &file, &found)`. Otherwise it's 0. The kit puts a small header at offset 4 of every app, after the entry's jump, for this: a second way in that the launcher calls with the folder (`kit/app_launch.h`).
 
 ## Apps
