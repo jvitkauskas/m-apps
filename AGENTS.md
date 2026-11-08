@@ -21,6 +21,7 @@ To check a change really works, run it. A clean build proves little here, as mos
 2. Add `<name>` to `APPS` in the `Makefile`.
 3. Set up what you use: `board_init(APP_BOARD == 2)` for keys, `display_init(APP_BOARD)` for the screen, and `flash_init(1, 1)` for flash.
 4. Call `board_restore()` before returning, if you called `board_init`.
+5. Say what it is for the card's launcher in `apps/<name>/META.TXT`: `name=`, `about=` and `version=` lines. Add it to `CARD_APPS` in the `Makefile` if it belongs on everyone's card.
 
 `apps/hello` is the example to copy. Each board gets its own build, with `APP_BOARD` set to 1 or 2.
 

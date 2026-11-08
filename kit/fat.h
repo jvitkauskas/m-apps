@@ -29,6 +29,9 @@ struct fat_named {
 };
 const char *fat_list_named(uint32_t cluster, const char extension[3], struct fat_named *entries, unsigned max, unsigned *count,
                            bool *more);
+/* The folders in a directory, without . and .., in name order as fat_list() has files: start is the folder's cluster,
+ * and size is 0. */
+const char *fat_list_folders(uint32_t cluster, struct fat_entry *entries, unsigned max, unsigned *count, bool *more);
 /* Writes n bytes and no more. False if the card or the file's chain fails, or it's beyond the file's end. */
 bool fat_read(const struct fat_entry *file, uint32_t offset, void *to, uint32_t n);
 

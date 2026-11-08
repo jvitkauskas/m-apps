@@ -1,0 +1,3 @@
+name=Hello
+about=Shows what it can see, then goes back
+version=1.0

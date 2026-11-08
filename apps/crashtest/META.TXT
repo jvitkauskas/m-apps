@@ -1,0 +1,3 @@
+name=Crash Test
+about=Crashes on purpose, to test the guard
+version=1.0

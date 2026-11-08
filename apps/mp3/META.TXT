@@ -1,0 +1,3 @@
+name=MP3 Player
+about=Plays the MP3 files on the card
+version=1.0

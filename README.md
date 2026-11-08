@@ -4,13 +4,13 @@ Programs that run from RAM on the M-VAVE FM-1 and SMK-37, without changing the f
 
 An app is one file. The same file can be started from an SD card, over MIDI, or with M-Flasher's `run-ram`. The format and the rules are in [m-bootloader's SPEC, §11.8](https://github.com/jvitkauskas/m-bootloader/blob/main/docs/SPEC.md).
 
-**Status:** early. `hello` and `usbdisk` have run on an FM-1 and an SMK-37, and `picker` on an SMK-37. There are no releases yet, so build from source.
+**Status:** early. `hello` and `usbdisk` have run on an FM-1 and an SMK-37, and the `picker` launcher on an SMK-37. There are no releases yet, so build from source.
 
 - **`run-ram`:** `make run` below uses this. It needs M-Flasher 0.9.2 or newer.
 - **MIDI:** m-bootloader 2.2's MIDI mode and RAM stage can load and run an app, but nothing public sends one yet. M-Flasher's page has no button for it.
 - **Firmware slots:** `slots` below keeps whole flash images on the card, and swaps between them with no computer.
 - **Sound:** `mp3` below plays MP3 files from the card, and has run on an SMK-37.
-- **SD card:** `picker` below lists the apps on a card and starts one, from the bootloader's `SD CARD` item. That has run on an SMK-37, with [m-bootloader #22](https://github.com/jvitkauskas/m-bootloader/pull/22), which isn't released yet. It hasn't run on an FM-1.
+- **SD card:** `picker` below is a launcher for the bootloader's `SD CARD` item: the apps on the card as tiles over rising bubbles, after the Wii's Homebrew Channel. It has run on an SMK-37, not yet on an FM-1.
 
 Writing apps with an agent? Start with [AGENTS.md](AGENTS.md), which has the loop, the rules and the traps found so far.
 
@@ -91,35 +91,61 @@ int app_main(unsigned lsb_mhz) {
 - `APP_BOARD` is 1 on the FM-1 and 2 on the SMK-37, and each board gets its own build.
 - An app needing a larger stack sets `<name>_STACK := 0x8000` in the `Makefile`. The default is 16 KiB.
 - The card driver is `kit/card.h`, for a unit with a card mod.
+- `META.TXT` beside the app's source is what the card's launcher shows for it (see `picker` below), and `ICON.QOI` its icon, if it has one. `make card` puts them in the app's folder.
+- Started by the launcher, `app_folder()` is the app's folder on the card, for its own files: mount the card, then `fat_find(app_folder(), "SONGS   DAT", &file, &found)`. Otherwise it's 0. The kit puts a small header at offset 4 of every app, after the entry's jump, for this: a second way in that the launcher calls with the folder (`kit/app_launch.h`).
 
 ## Apps
 
 ### picker
 
-Lists the apps in `/MBOOT/APPS` on the card and starts the one you choose. It needs a card mod, the same as `usbdisk`. It builds as `build/<board>/MENU.BIN`, which goes on the card as `/MBOOT/MENU.BIN`, as the bootloader's `SD CARD` item looks for that name. Apps go in the folder as `NAME.APP`, built for that board.
+The launcher for the card: the apps in `/MBOOT/APPS` as tiles over rising bubbles, each with its name, a line about it, its version and an icon, and it starts the one you choose. It needs a card mod, the same as `usbdisk`. It comes in two parts:
+
+- `build/<board>/MENU.BIN` (`apps/menu`), which the bootloader's `SD CARD` item runs, loads the launcher and runs it. Stage 2 only has 32 KiB.
+- `build/<board>/LAUNCH.BIN` (`apps/picker`) is the launcher. It runs from `0x01C0A800`, with 48 KiB, which an app that returns leaves alone (m-bootloader's SPEC §11.8), so it's still there when the app ends. Its lists and pictures go in the apps' slot until it loads an app, and it reads the card again after one.
+
+Each app has a folder of its own in `/MBOOT/APPS`, as the Homebrew Channel has them. `BOOT.APP` is the app, built for that board, and the rest is optional:
 
 ```
 /MBOOT/MENU.BIN
-/MBOOT/APPS/HELLO.APP
-/MBOOT/APPS/USBDISK.APP
+/MBOOT/LAUNCH.BIN
+/MBOOT/APPS/MP3/BOOT.APP
+/MBOOT/APPS/MP3/ICON.QOI
+/MBOOT/APPS/MP3/META.TXT
+/MBOOT/APPS/MP3/...            the app's own files
 ```
 
-To run it without the bootloader's menu:
+`make card BOARD=smk37` (or `fm1`) builds all of that in `build/smk37/card/MBOOT`, for these apps: hello, usbdisk, slots, tone and mp3. Copy it to the card's root.
+
+`META.TXT` is plain text, lines of `key=value`, and every line is optional:
+
+```
+name=MP3 Player
+about=Plays the MP3 files on the card
+version=1.0
+```
+
+Without a name, the launcher shows the folder's. Other keys are skipped, as is anything past the first 512 bytes. A folder without `BOOT.APP` isn't listed.
+
+An icon is 44 × 44 pixels, as QOI with transparency, and the launcher rounds its corners. `python3 tools/icon.py picture.png ICON.QOI` makes one from any picture (it needs Pillow). Without one, the tile has the name's first letter on a colour.
+
+To run it without the bootloader's menu, with the card set up:
 
 ```sh
 sudo m-flasher download-mode
 sudo m-flasher run-ram build/smk37/MENU.BIN --addr 0x01C28000
 ```
 
-- **Keys:** OCT- and OCT+ move, and PLAY starts, on the FM-1. On the SMK-37, it's `<`, `>` and SEQ PLAY. `BACK`, at the end of the list, goes back to what started it, which from `run-ram` means download mode.
-- **Names:** it reads 8.3 names only. A longer name shows as its short form, such as `LONGFI 1` for `LONGFILENAME.APP`, as the screen has no `~`.
-- **Checks:** before loading, it checks the file's trailer and refuses another board's app with `OTHER BOARD`. After loading, it checks the CRC. Whatever's refused stays in the list with the reason shown.
-- **Returning:** an app that returns comes back to the list, which is read again, as the app may have changed the card. A non-zero result shows as `RETURNED 7`. It shows the first 100 apps by name.
+- **Keys:** OCT- and OCT+ move, and PLAY starts, on the FM-1. On the SMK-37, it's `<`, `>` and SEQ PLAY. Holding a key repeats it. `Back`, at the end of the list, goes back to what started it, which from `run-ram` means download mode.
+- **Names:** folders are found by their 8.3 names. The name to show comes from `META.TXT`, and the list is in order of it.
+- **Checks:** before loading, it checks the file's trailer and refuses another board's app with `OTHER BOARD`. After loading, it checks the CRC. What's refused shows in the bar at the bottom.
+- **Returning:** an app that returns comes back to the list, which is read again, as the app may have changed the card. A non-zero result shows as `MP3 Player returned 7`. It shows the first 100 apps by name.
 - **Size:** it refuses a file over `0x4F000` bytes, the most the kit can build, as the log starts where that ends.
+- **Speed:** the bubbles redraw only where they move, at about 34 frames a second. On the SMK-37 it runs the panel at LSB/2 rather than the bootloader's LSB/5, which has worked on one unit; the FM-1 keeps LSB/5 until that's been tried there.
+- **The look:** `tests/scene_host.c` draws the screen on a computer, from the same code, for trying changes without a unit.
 
 ### mp3
 
-Lists the MP3 files in the card's root, plays the one you choose, and shows the time elapsed and left. It needs a card mod, and `picker` to start it: put `build/<board>/mp3.app` on the card as `/MBOOT/APPS/MP3.APP`. It's mainly a reference for playing sound and reading a card at once, so it has no pause, seeking or volume.
+Lists the MP3 files in the card's root, plays the one you choose, and shows the time elapsed and left. It needs a card mod, and `picker` to start it: `make card` puts it in `/MBOOT/APPS/MP3`. It's mainly a reference for playing sound and reading a card at once, so it has no pause, seeking or volume.
 
 - **Sound** comes from `kit/audio.c`, polled, with no interrupts: fill a half buffer each time one comes free. The DAC runs at 24 MHz / 544, about 44118 Hz, which plays 44.1 kHz files 0.04% fast. Other rates go through a simple resampler. If filling falls behind, the hardware repeats old samples, and nothing warns of it, so the app counts missed halves in its log.
 - **Decoding** is [minimp3](https://github.com/lieff/minimp3). At the CPU's 360 MHz from the bootloader, a 320 kbps frame took about 3.3 ms of its 26 ms. It also keeps up at 96 MHz from `run-ram`, at about 12.5 ms.
@@ -130,7 +156,7 @@ Lists the MP3 files in the card's root, plays the one you choose, and shows the 
 
 ### slots
 
-Keeps firmware and its settings on the card, and swaps between them with no computer. It needs a card mod, and `picker` to start it: put `build/<board>/slots.app` on the card as `/MBOOT/APPS/SLOTS.APP`.
+Keeps firmware and its settings on the card, and swaps between them with no computer. It needs a card mod, and `picker` to start it: `make card` puts it in `/MBOOT/APPS/SLOTS`.
 
 A slot is `/MBOOT/SLOTS/<8 hex digits>/NAME.BIN`, in a folder named from the unit's unique ID, so slots can't be loaded on the wrong unit by mistake. It's the same 1 MiB file as an M-Flasher backup, so slots can be copied and renamed on a computer. Names are 8.3.
 
@@ -173,3 +199,4 @@ MIT, as m-bootloader is. See [LICENSE](LICENSE). Two parts have their own licenc
 
 - `kit/audio.c` and `kit/audio.h` are MPL-2.0, adapted from [felucca-bsp](https://github.com/hugelton/felucca-bsp). MPL applies file by file, so changes to these two files stay MPL-2.0, and an app using them can have any licence.
 - `apps/mp3/minimp3.h` is [minimp3](https://github.com/lieff/minimp3), CC0-1.0.
+- `apps/picker/font.h` is Barlow Semi Condensed, under the SIL Open Font License 1.1 (`apps/picker/Barlow-OFL.txt`), as 4-bit alpha made by fm1-base's `tools/gen_font.py`.

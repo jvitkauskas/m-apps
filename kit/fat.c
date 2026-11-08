@@ -167,9 +167,8 @@ static void visit_name(struct walk *w, const uint8_t *e) {
     }
 }
 
-static void visit_file(struct walk *w, const uint8_t *e) {
-    if (e[11]&0x10 || memcmp(e+8, w->match, 3))
-        return;
+/* e into the list, in name order, keeping the first max by name */
+static void insert(struct walk *w, const uint8_t *e) {
     unsigned at = 0;
     while (at < w->count && memcmp(w->entries[at].name, e, 8) < 0)
         ++at;
@@ -184,6 +183,16 @@ static void visit_file(struct walk *w, const uint8_t *e) {
     w->entries[at].start = entry_start(e);
     w->entries[at].size = core_le32(e+28);
     ++w->count;
+}
+
+static void visit_file(struct walk *w, const uint8_t *e) {
+    if (!(e[11]&FAT_ATTR_FOLDER) && !memcmp(e+8, w->match, 3))
+        insert(w, e);
+}
+
+static void visit_subfolder(struct walk *w, const uint8_t *e) {
+    if (e[11]&FAT_ATTR_FOLDER && e[0] != '.')
+        insert(w, e);
 }
 
 static void long_piece(struct walk *w, const uint8_t *e) {
@@ -355,6 +364,14 @@ const char *fat_list(uint32_t cluster, const char extension[3], struct fat_entry
                      bool *more) {
     struct walk w = {.match = extension, .entries = entries, .max = max};
     const char *error = walk(cluster, visit_file, &w);
+    *count = w.count;
+    *more = w.more;
+    return error;
+}
+
+const char *fat_list_folders(uint32_t cluster, struct fat_entry *entries, unsigned max, unsigned *count, bool *more) {
+    struct walk w = {.entries = entries, .max = max};
+    const char *error = walk(cluster, visit_subfolder, &w);
     *count = w.count;
     *more = w.more;
     return error;

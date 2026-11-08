@@ -25,6 +25,8 @@
 #define EMU_MSG (*(volatile uint32_t *)0x01eef0d4u)
 #define CRASH_SHOW_S 8u
 extern uint8_t __payload_end[], __bss_start[], __bss_end[];
+extern const struct app_launch *app_launch_given;
+static struct app_launch launch;
 extern void app_crash_entry(void);
 
 static struct {
@@ -33,6 +35,10 @@ static struct {
     uint8_t retained[DOWNLOAD_MODE_SIZE];
     uint32_t vector, icfg;
 } guard;
+
+uint32_t app_folder(void) {
+    return launch.folder;
+}
 
 void app_feed(void) {
     if (guard.on)
@@ -103,6 +109,9 @@ int app_start(uint32_t argument) {
     memcpy(trailer, __payload_end, sizeof trailer);
     memset(__bss_start, 0, (size_t)(__bss_end-__bss_start));
     app_log_begin(trailer);
+    /* The launcher's, copied: it stays in the launcher's RAM, but the app needn't rely on that. */
+    if (app_launch_given && !memcmp(app_launch_given->magic, "LNCH", 4) && app_launch_given->format == APP_LAUNCH_FORMAT)
+        launch = *app_launch_given;
     if (from_rom) {
         hal_early();
         usb_midi_stop();
