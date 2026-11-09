@@ -26,6 +26,13 @@ make TOOLCHAIN=/path/to/toolchain
 
 This makes `build/fm1/hello.app` and `build/smk37/hello.app`. The apps use m-bootloader's drivers, which come in as the `m-bootloader` submodule.
 
+`make release` makes what a release carries, in `build/release`. The on-device store installs from these:
+- **`<app>-<board>.tar`:** an app's folder for `/MBOOT/APPS/<APP>/`, such as `mp3-smk37.tar` with `BOOT.APP`, `META.TXT` and `ICON.QOI`.
+- **`mboot-<board>.tar`:** `MENU.BIN` and `LAUNCH.BIN` for `/MBOOT`.
+- **`SHA256SUMS`.**
+
+Each tar is plain ustar, made by `tools/app_tar.py`. Every name is 8.3 in capitals, as the kit's card code writes them, and the same files always make the same bytes. CI builds and tests every push, and a `v*` tag publishes a release with these files.
+
 ## Run
 
 This starts an app, waits for it to end, prints its log and restarts the unit, from firmware or download mode:
