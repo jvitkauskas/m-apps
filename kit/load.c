@@ -49,7 +49,8 @@ uint32_t app_file_launched_entry(const struct fat_entry *file) {
     if (memcmp(header.magic, "MAPP", 4) || header.format != APP_HEADER_FORMAT)
         return 0;
     uint32_t entry = header.launched_entry;
-    return entry >= APP_ADDRESS && entry < APP_ADDRESS+file->size-TRAILER ? entry:0;
+    /* an instruction's address: inside the image and on a word */
+    return !(entry&3u) && entry >= APP_ADDRESS && entry < APP_ADDRESS+file->size-TRAILER ? entry:0;
 }
 
 /* value into field, up to the line's end: a character beyond ASCII as one '?' */

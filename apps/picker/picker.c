@@ -48,13 +48,15 @@ static bool more, card_ok;
 
 /* ---- time: TIMER4 free-running from the 24 MHz crystal ---- */
 
-static void time_init(void) {
-    if ((T4_CON&15u) == ((2u << 2)|1u))
-        return;
+/* Sets TIMER4 up unless it already runs that way, as after an app that left it alone. True if it started it again. */
+static bool time_init(void) {
+    if ((T4_CON&15u) == ((2u << 2)|1u) && T4_PRD == 0xffffffffu)
+        return false;
     T4_CON = 0;
     T4_PRD = 0xffffffffu;
     T4_CNT = 0;
     T4_CON = (2u << 2)|1u|(1u << 14);
+    return true;
 }
 
 static unsigned ms_since(uint32_t t) { return (T4_CNT-t)/T4_PER_MS; }
@@ -371,6 +373,13 @@ int app_main(unsigned lsb_mhz) {
         memcpy(last_run, a->id, sizeof last_run);
         int result = run_app(a, lsb_mhz);
         app_log("%s returned %d", a->text.name, result);
+        /* An app may have stopped TIMER4 or used it for itself; without it the frame wait would never end. */
+        if (time_init()) {
+            held_since = T4_CNT;
+#ifdef KEY_SCRIPT
+            script_last = T4_CNT;
+#endif
+        }
         if (result) {
             describe_result(a->text.name, result, note_text);
             note = note_text;

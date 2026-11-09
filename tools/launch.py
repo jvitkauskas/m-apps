@@ -19,7 +19,7 @@ def main():
     parser.add_argument('output', type=Path)
     args = parser.parse_args()
     code = args.input.read_bytes()
-    if not 8 <= len(code)+8 <= LARGEST:
+    if not 16 <= len(code)+8 <= LARGEST:
         parser.exit(1, f'{args.input}: {len(code)+8} bytes with the trailer, not 16 to {LARGEST}\n')
     args.output.write_bytes(code+b'LNC1'+struct.pack('<HBB', crc16(code), BOARDS[args.board], 1))
 
