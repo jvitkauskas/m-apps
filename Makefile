@@ -38,6 +38,7 @@ test:
 	python3 tests/scene_test.py
 	python3 tests/fat_write_test.py
 	python3 tests/slots_test.py
+	python3 tests/app_tar_test.py
 
 # make run APP=hello BOARD=fm1: start an app with run-ram, wait for it to end, and print its log.
 # make log BOARD=fm1: print the log an app left, however it was started.
@@ -106,4 +107,21 @@ card: build/$(BOARD)/MENU.BIN build/$(BOARD)/LAUNCH.BIN $(foreach a,$(CARD_APPS)
 		cp build/$(BOARD)/$(a).app $$d/BOOT.APP; cp apps/$(a)/META.TXT $$d/; \
 		if [ -f apps/$(a)/ICON.QOI ]; then cp apps/$(a)/ICON.QOI $$d/; fi;)
 
-.PHONY: all clean test run log card
+# make release: build/release, what a release carries for the store: <app>-<board>.tar, an app's folder for
+# /MBOOT/APPS/<APP>/, and mboot-<board>.tar, MENU.BIN and LAUNCH.BIN for /MBOOT, each a plain tar (tools/app_tar.py),
+# and SHA256SUMS.
+BOARDS := fm1 smk37
+release:
+	rm -rf build/release
+	$(foreach b,$(BOARDS),$(MAKE) card BOARD=$(b) &&) true
+	mkdir -p build/release
+	set -e; for b in $(BOARDS); do \
+		for a in $(CARD_APPS); do \
+			python3 tools/app_tar.py build/release/$$a-$$b.tar build/$$b/card/MBOOT/APPS/$$(echo $$a | tr a-z A-Z); \
+		done; \
+		rm -rf build/$$b/mboot; mkdir -p build/$$b/mboot; cp build/$$b/MENU.BIN build/$$b/LAUNCH.BIN build/$$b/mboot/; \
+		python3 tools/app_tar.py build/release/mboot-$$b.tar build/$$b/mboot; \
+	done
+	cd build/release && sha256sum *.tar > SHA256SUMS
+
+.PHONY: all clean test run log card release
