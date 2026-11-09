@@ -122,6 +122,6 @@ release:
 		rm -rf build/$$b/mboot; mkdir -p build/$$b/mboot; cp build/$$b/MENU.BIN build/$$b/LAUNCH.BIN build/$$b/mboot/; \
 		python3 tools/app_tar.py build/release/mboot-$$b.tar build/$$b/mboot; \
 	done
-	cd build/release && LC_ALL=C sha256sum *.tar > SHA256SUMS
+	cd build/release && ls *.tar | LC_ALL=C sort | xargs sha256sum > SHA256SUMS
 
 .PHONY: all clean test run log card release
