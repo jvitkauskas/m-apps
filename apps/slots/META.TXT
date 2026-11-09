@@ -1,0 +1,3 @@
+name=Slots
+about=Swap firmware and its settings from the card
+version=1.0

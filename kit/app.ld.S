@@ -1,7 +1,12 @@
 /* SPDX-License-Identifier: MIT */
 /* An app's slot: m-bootloader's docs/SPEC.md §11.8, without its top 0xd80 bytes, which hold the log (kit/log.h). */
 ENTRY(app_entry)
-MEMORY { slot (rwx) : ORIGIN = APP_ORIGIN, LENGTH = APP_LENGTH }
+MEMORY {
+    slot (rwx) : ORIGIN = APP_ORIGIN, LENGTH = APP_LENGTH
+    /* Below the slots, for buffers an app keeps out of its own (.dma). Not loaded. An app that returns has from
+     * 0x01C16800 (SPEC §11.8); the card's stage 2 has from 0x01C0A800 (§11.5). */
+    low (rw) : ORIGIN = APP_LOW, LENGTH = 0x01C20000 - APP_LOW
+}
 SECTIONS {
     .text ORIGIN(slot) : {
         KEEP(*(.entry))
@@ -20,6 +25,7 @@ SECTIONS {
         __main_stack_bottom = .; . += APP_STACK; __main_stack_top = .;
     } > slot
     __ram_end = .;
+    .dma (NOLOAD) : { *(.dma .dma.*) } > low
     /DISCARD/ : { *(.comment) *(.note*) *(.eh_frame*) *(.llvm_addrsig) }
     ASSERT(__payload_end - ORIGIN(slot) + 8 <= LENGTH(slot), "the file, with its trailer, doesn't fit the slot")
 }

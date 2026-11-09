@@ -21,6 +21,11 @@ def app(code, board=2, fmt=1):
     return code+b'APP1'+struct.pack('<HBB', crc16(code), board, fmt)
 
 
+def kit_app(body=b'b'*200, entry=0x01c30070, magic=b'MAPP'):
+    """An app as the kit builds it: the entry's jump, the header (kit/app_launch.h), then the rest."""
+    return app(b'\xc0\xea\x3c\x00'+magic+bytes([1, 0, 0, 0])+struct.pack('<I', entry)+body)
+
+
 class Card:
     """A FAT32 volume. Clusters are handed out in the order asked for, so files can be fragmented."""
 
@@ -123,7 +128,8 @@ with tempfile.TemporaryDirectory() as folder:
     host = folder/'host'
     subprocess.run([os.environ.get('HOSTCC', 'cc'), '-std=c11', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
                     f'-I{ROOT}/apps/picker', f'-I{ROOT}/kit', '-idirafter', f'{ROOT}/m-bootloader/include', '-DPLATFORM_SIM',
-                    ROOT/'tests/fat_host.c', ROOT/'kit/fat.c', ROOT/'apps/picker/load.c', ROOT/'m-bootloader/src/core.c',
+                    ROOT/'tests/fat_host.c', ROOT/'kit/fat.c', ROOT/'kit/load.c', ROOT/'apps/picker/catalog.c',
+                    ROOT/'m-bootloader/src/core.c',
                     '-o', host], check=True)
 
     def run(image, name='-', board=2, fail='-'):
@@ -236,7 +242,7 @@ with tempfile.TemporaryDirectory() as folder:
     card, apps = standard()
     card.write_file(apps, 'ANY', 'APP', app(b'g'*600, board=0))
     assert run(card.build(mbr=False), 'ANY')[-1] == 'load ok'
-    refused(app(b'g'*600, fmt=2), 'NEWER APP FORMAT')
+    refused(app(b'g'*600, fmt=2), 'NEWER FILE FORMAT')
     refused(b'g'*600+b'STG2'+struct.pack('<HBB', crc16(b'g'*600), 0, 0), 'NOT AN APP FILE')
     refused(b'short', 'NOT AN APP FILE')
     refused(good[:100]+b'!'+good[101:], 'APP FILE DAMAGED')
@@ -269,4 +275,51 @@ with tempfile.TemporaryDirectory() as folder:
     assert run(image, 'BAD', fail=data_at+clusters[2]-2)[-1] == 'load CARD READ ERROR'
     assert run(image, fail=0)[0].startswith('list CARD READ ERROR')
     assert run(image, 'BAD', fail=RESERVED)[-1] == 'load CARD READ ERROR'
+    # The launcher's list (apps/picker/catalog.c): a folder each, with BOOT.APP, by the name shown.
+    def catalog(image):
+        lines = run(image, '@catalog')
+        return lines[0], [line[4:].split('|') for line in lines[1:] if line.startswith('app ')]
+
+    card, apps = standard()
+    zed = card.make_folder(apps, 'ZED')
+    card.write_file(zed, 'BOOT', 'APP', kit_app())
+    card.write_file(zed, 'META', 'TXT', b'name=zed\nversion=2.0\n')
+    mp3 = card.make_folder(apps, 'MP3')
+    card.write_file(mp3, 'BOOT', 'APP', kit_app(b'm'*300))
+    card.write_file(mp3, 'ICON', 'QOI', b'i'*500)
+    card.write_file(mp3, 'META', 'TXT', b'name=MP3 Player\r\nabout = Plays the MP3 files on the card \r\n# a note\nauthor=x\n')
+    card.write_file(mp3, 'SONGS', 'DAT', b'd'*100)
+    empty = card.make_folder(apps, 'EMPTY')
+    card.write_file(empty, 'README', 'TXT', b'no app here')
+    bare = card.make_folder(apps, 'BARE')
+    card.write_file(bare, 'BOOT', 'APP', app(b'x'*100))
+    # An app on its own, as before folders, isn't one.
+    card.write_file(apps, 'LONE', 'APP', kit_app())
+    head, listed = catalog(card.build(mbr=False))
+    assert head == 'catalog ok 3 0', head
+    assert listed == [
+        ['BARE    ', '108', '0', 'BARE', '', '', '0'],
+        ['MP3     ', str(len(kit_app(b'm'*300))), '500', 'MP3 Player', 'Plays the MP3 files on the card', '', '1c30070'],
+        ['ZED     ', str(len(kit_app())), '0', 'zed', '', '2.0', '1c30070'],
+    ], listed
+
+    # META.TXT: long values cut, characters the screen hasn't got as one ?, empty values and odd lines ignored, at most
+    # 512 bytes read. A second entry outside the app, or a header that isn't the kit's, isn't used.
+    card, apps = standard()
+    odd = card.make_folder(apps, 'ODD')
+    card.write_file(odd, 'BOOT', 'APP', kit_app(entry=0x01c00000))
+    card.write_file(odd, 'META', 'TXT', ('name=Café ♫ '+'x'*40+'\nabout=\nversion\n=nothing\nversion=3.1\n').encode()
+                    + b'\n'*600+b'name=too late\n')
+    other = card.make_folder(apps, 'OTHER')
+    card.write_file(other, 'BOOT', 'APP', kit_app(magic=b'INFO'))
+    head, listed = catalog(card.build(mbr=False))
+    assert listed == [['ODD     ', str(len(kit_app())), '0', 'Caf? ? '+'x'*17, '', '3.1', '0'],
+                      ['OTHER   ', str(len(kit_app())), '0', 'OTHER', '', '', '0']], listed
+
+    # Folders without apps, and none at all: nothing to start.
+    card, apps = standard()
+    card.make_folder(apps, 'NOTHING')
+    assert catalog(card.build(mbr=False))[0] == 'catalog NO APPS IN /MBOOT/APPS 0 0'
+    card, apps = standard()
+    assert catalog(card.build(mbr=False))[0] == 'catalog NO APPS IN /MBOOT/APPS 0 0'
 print('picker OK')

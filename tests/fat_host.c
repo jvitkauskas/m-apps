@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 /* Runs apps/picker's FAT and loader code on the computer, on a card image. See tests/picker_test.py. */
+#include "catalog.h"
 #include "fat.h"
 #include "load.h"
 #include <stdio.h>
@@ -32,7 +33,8 @@ bool card_read(uint32_t sector, uint8_t *data) {
     return true;
 }
 
-/* image, board, name to load or -, out file for what was loaded, sector that fails or -. */
+/* image, board, name to load or - (or @catalog: the launcher's list, apps/picker/catalog.c), out file for what was
+ * loaded, sector that fails or -. */
 int main(int argc, char **argv) {
     if (argc != 6)
         return 2;
@@ -62,6 +64,19 @@ int main(int argc, char **argv) {
         error = fat_folder(&folder, "APPS       ", "NO /MBOOT/APPS");
     if (!error)
         error = fat_list(folder, "APP", apps, 100, &count, &more);
+    if (!strcmp(argv[3], "@catalog")) {
+        static struct catalog c;
+        if (!error)
+            error = catalog_read(folder, &c);
+        printf("catalog %s %u %u\n", error ? error:"ok", error ? 0:c.count, c.more);
+        for (unsigned i = 0; !error && i < c.count; ++i) {
+            const struct catalog_app *a = &c.apps[i];
+            printf("app %.8s|%u|%u|%s|%s|%s|%x\n", a->id, a->file.size, a->icon.size, a->text.name, a->text.about,
+                   a->text.version, a->launched_entry);
+        }
+        free(image);
+        return 0;
+    }
     printf("list %s %u %u\n", error ? error:"ok", count, more);
     for (unsigned i = 0; i < count; ++i)
         printf("app %.8s %u\n", apps[i].name, apps[i].size);

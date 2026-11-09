@@ -1,0 +1,3 @@
+name=Tone
+about=Two quiet tones, and the real sample rate
+version=1.0

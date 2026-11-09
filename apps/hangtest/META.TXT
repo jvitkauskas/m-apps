@@ -1,0 +1,3 @@
+name=Hang Test
+about=Hangs on purpose, to test the watchdog
+version=1.0

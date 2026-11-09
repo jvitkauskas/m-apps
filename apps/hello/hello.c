@@ -14,7 +14,7 @@ static void show_mhz(unsigned row, unsigned mhz) {
 }
 
 int app_main(unsigned lsb_mhz) {
-    app_log("hello on board %d", APP_BOARD);
+    app_log("hello on board %d, %s", APP_BOARD, app_folder() ? "from its folder":"not from a folder");
     board_init(APP_BOARD == 2);
     bool screen = display_init(APP_BOARD);
     app_log("screen %s", screen ? "found":"not found");
@@ -24,6 +24,8 @@ int app_main(unsigned lsb_mhz) {
         display_text(1, GREEN, "HELLO FROM RAM");
         display_text(3, WHITE, APP_BOARD == 2 ? "SMK-37" : "FM-1");
         show_mhz(4, lsb_mhz);
+        if (app_folder())
+            display_text(5, WHITE, "FROM ITS FOLDER");
         display_text(6, YELLOW, "ANY KEY: BACK");
         display_text(7, WHITE, "OR WAIT 10 SECONDS");
     }

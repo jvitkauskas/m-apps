@@ -1,0 +1,3 @@
+name=USB Disk
+about=The card as a USB drive
+version=1.0
