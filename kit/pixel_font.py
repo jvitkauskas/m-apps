@@ -136,25 +136,24 @@ def check(font, height):
 def main():
     check(BIG, 7)
     check(SMALL, 5)
-    out = ['/* Made by pixel_font.py from the pictures there. Rows top first, bit 0 the leftmost pixel. */',
-           '#include <stdint.h>', '/* 5 x 7, for ASCII 32 to 126; lowercase uses the capitals. */',
-           'static const uint8_t big_font[95][7] = {']
+    out = ['// SPDX-License-Identifier: MIT', '//! Made by pixel_font.py from the pictures there. Rows top first, bit 0 the leftmost pixel.',
+           '', '/// 5 x 7, for ASCII 32 to 126; lowercase uses the capitals.', 'pub static BIG: [[u8; 7]; 95] = [']
     for code in range(32, 127):
         c = chr(code)
         rows = BIG.get(c.upper() if c.islower() else c, BIG['?'])
-        out.append('    {' + ', '.join(str(sum(1 << i for i, p in enumerate(r) if p == '#')) for r in rows) + '},')
-    out += ['};', '/* 3 x 5 (5 wide for M and W, 4 for N): its width, then the rows. Unknown characters are blank. */',
-            'static const uint8_t small_font[95][6] = {']
+        out.append('    [' + ', '.join(str(sum(1 << i for i, p in enumerate(r) if p == '#')) for r in rows) + '],')
+    out += ['];', '/// 3 x 5 (5 wide for M and W, 4 for N): its width, then the rows. Unknown characters are blank.',
+            'pub static SMALL: [[u8; 6]; 95] = [']
     for code in range(32, 127):
         c = chr(code)
         rows = SMALL.get(c.upper() if c.islower() else c)
         if rows is None:
-            out.append('    {0},')
+            out.append('    [0; 6],')
             continue
-        out.append('    {' + ', '.join([str(len(rows[0]))] + [str(sum(1 << i for i, p in enumerate(r) if p == '#'))
-                                                              for r in rows]) + '},')
-    out.append('};')
-    (Path(__file__).parent/'pixel_font.h').write_text('\n'.join(out) + '\n')
+        out.append('    [' + ', '.join([str(len(rows[0]))] + [str(sum(1 << i for i, p in enumerate(r) if p == '#'))
+                                                              for r in rows]) + '],')
+    out.append('];')
+    (Path(__file__).parent/'pixel_font.rs').write_text('\n'.join(out) + '\n')
 
 
 if __name__ == '__main__':

@@ -1,11 +1,14 @@
 # SPDX-License-Identifier: MIT
-"""Run kit/fat.c's writing on real FAT32 images, checked by fsck and mtools, with the power cut at every write."""
+"""Run kit/fat.rs's writing on real FAT32 images, checked by fsck and mtools, with the power cut at every write."""
 import os
 from pathlib import Path
 import random
 import shutil
 import subprocess
 import tempfile
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from host import build as host_build  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 ENV = {**os.environ, 'MTOOLS_SKIP_CHECK': '1'}
 TOOLS = [shutil.which(t) or shutil.which(f'/usr/sbin/{t}') or shutil.which(f'/sbin/{t}') for t in ('mkfs.vfat', 'fsck.vfat', 'mcopy', 'mdir', 'mmd')]
@@ -22,10 +25,7 @@ def blob(size):
 
 with tempfile.TemporaryDirectory() as folder:
     folder = Path(folder)
-    host = folder/'host'
-    subprocess.run([os.environ.get('HOSTCC', 'cc'), '-std=c11', '-D_DEFAULT_SOURCE', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
-                    f'-I{ROOT}/kit', '-idirafter', f'{ROOT}/m-bootloader/include', '-DPLATFORM_SIM',
-                    ROOT/'tests/fatw_host.c', ROOT/'kit/fat.c', ROOT/'m-bootloader/src/core.c', '-o', host], check=True)
+    host = host_build('fatw_host')
     image = folder/'card'
     data = folder/'data'
 

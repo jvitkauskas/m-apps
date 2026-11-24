@@ -5,8 +5,11 @@ from pathlib import Path
 import random
 import shutil
 import subprocess
+import sys
 import tempfile
 import zlib
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from host import build as host_build  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 ENV = {**os.environ, 'MTOOLS_SKIP_CHECK': '1', 'ASAN_OPTIONS': 'detect_leaks=0'}
 TOOLS = [shutil.which(t) or shutil.which(f'/usr/sbin/{t}') or shutil.which(f'/sbin/{t}') for t in ('mkfs.vfat', 'fsck.vfat', 'mcopy', 'mmd')]
@@ -59,10 +62,7 @@ def parse(data):
 
 with tempfile.TemporaryDirectory() as folder:
     folder = Path(folder)
-    host = folder/'host'
-    subprocess.run([os.environ.get('HOSTCC', 'cc'), '-std=c11', '-D_DEFAULT_SOURCE', '-O1', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined', '-DAPP_BOARD=2',
-                    f'-I{ROOT}/apps/slots', f'-I{ROOT}/kit', '-idirafter', f'{ROOT}/m-bootloader/include', '-DPLATFORM_SIM',
-                    ROOT/'tests/slots_host.c', ROOT/'apps/slots/slotfile.c', ROOT/'kit/fat.c', ROOT/'m-bootloader/src/core.c', '-o', host], check=True)
+    host = host_build('slots_host')
     card, flash = folder/'card', folder/'flash'
 
     def blank(mib=64):

@@ -5,11 +5,11 @@ Most of it is MIT, Copyright (c) 2026 Julius Vitkauskas (LICENSE in the source).
 
 These parts are MPL-2.0. Their source is in m-apps at the address above. The MPL-2.0 is at
 https://mozilla.org/MPL/2.0/ and in the source as LICENSES/MPL-2.0.txt.
-- The keys (kit/keys.c and kit/keys.h), from felucca-bsp's key tables
+- The keys (kit/keys.rs), from felucca-bsp's key tables
   (https://github.com/hugelton/felucca-bsp):
     Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments, and Charles Vestal
     Copyright (C) 2026 Kerem Kilic (Ellic Studio)
-- The typing page (kit/textentry.c and kit/textentry.h), adapted from fm1-radio
+- The typing page (kit/textentry.rs), adapted from fm1-radio
   (https://github.com/charlesvestal/fm1-radio):
     Copyright (C) 2026 Charles Vestal
 

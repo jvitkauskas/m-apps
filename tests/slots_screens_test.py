@@ -1,21 +1,17 @@
 # SPDX-License-Identifier: MIT
-"""Draw slots' screens on the computer (tests/slots_screens_host.c), with the sanitizers, for both boards. With an
-argument, it keeps the pictures there, as PPM."""
-import os
+"""Draw slots' screens on the computer (tests/slots_screens_host.rs), with overflow checks and debug assertions, for
+both boards. With an argument, it keeps the pictures there, as PPM."""
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
-ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from host import build as host_build  # noqa: E402
 
 with tempfile.TemporaryDirectory() as folder:
     out = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(folder)
     out.mkdir(parents=True, exist_ok=True)
-    host = Path(folder)/'host'
-    subprocess.run([os.environ.get('HOSTCC', 'cc'), '-std=c99', '-D_DEFAULT_SOURCE', '-g', '-Wall', '-Wextra', '-Werror',
-                    '-fsanitize=address,undefined', '-iquote', ROOT/'apps/slots', '-iquote', ROOT/'kit', '-iquote',
-                    ROOT/'m-bootloader/include', ROOT/'tests/slots_screens_host.c', ROOT/'apps/slots/screens.c',
-                    ROOT/'kit/canvas.c', ROOT/'kit/textentry.c', '-o', host], check=True)
+    host = host_build('slots_screens_host')
     result = subprocess.run([host, out], capture_output=True, text=True, timeout=120)
     if result.returncode:
         sys.exit(result.stdout+result.stderr)

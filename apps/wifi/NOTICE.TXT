@@ -8,29 +8,29 @@ These parts are MPL-2.0. Their source is in m-apps at the address above. The MPL
 https://mozilla.org/MPL/2.0/ and in the source as LICENSES/MPL-2.0.txt.
 - The radio's start-up and WiFi path (apps/wifi/bsp/), from w0ts/fm1-base
   (https://github.com/w0ts/fm1-base) and felucca-bsp (https://github.com/hugelton/felucca-bsp),
-  and the WPA2 station, its crypto and the IP layer (apps/wifi/wifi_sta.c, wifi_crypto.c,
-  wifi_ip.c), from Optimist (https://github.com/w0ts/optimist). Some are offered as
+  and the WPA2 station, its crypto and the IP layer (apps/wifi/wifi_sta.rs, wifi_crypto.rs,
+  wifi_ip.rs), from Optimist (https://github.com/w0ts/optimist). Some are offered as
   "GPL-3.0-only OR MPL-2.0" and are taken here under MPL-2.0.
     Copyright (C) 2026 Henri David (hdavid), Optimist
     Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
     Copyright (C) 2026 Charles Vestal
-- Joining a network (apps/wifi/net.c), after fm1-base's device/wifi_own.c,
+- Joining a network (apps/wifi/net.rs), after fm1-base's device/wifi_own.c,
   Copyright (C) 2026 Henri David (hdavid), Optimist.
-- The keys (kit/keys.c and kit/keys.h), from felucca-bsp's key tables:
+- The keys (kit/keys.rs), from felucca-bsp's key tables:
     Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments, and Charles Vestal
     Copyright (C) 2026 Kerem Kilic (Ellic Studio)
-- The typing page (kit/textentry.c and kit/textentry.h), adapted from fm1-radio
+- The typing page (kit/textentry.rs), adapted from fm1-radio
   (https://github.com/charlesvestal/fm1-radio), Copyright (C) 2026 Charles Vestal.
 
 These are Apache-2.0, whose text is below: values JieLi publishes in its AC79 AIoT SDK
 (https://gitee.com/Jieli-Tech/fw-AC79_AIoT_SDK), recorded as the writes its code makes, and
 changed (Apache-2.0 section 4(b)) by Optimist as each file's header says.
-- apps/wifi/bsp/fm1_rf_cal.h, the radio's calibration:
+- apps/wifi/bsp/fm1_rf_cal.rs, the radio's calibration:
     Copyright (c) 2024-2026 Zhuhai Jieli Technology Co., Ltd.
     Copyright (C) 2026 Charles Vestal
-- apps/wifi/bsp/fm1_wifi_wlc.h, the coexistence set-up:
+- apps/wifi/bsp/fm1_wifi_wlc.rs, the coexistence set-up:
     Copyright (c) 2024-2026 Zhuhai Jieli Technology Co., Ltd.
-- apps/wifi/bsp/ble_rf_tables.h, the BLE radio's start-up values, from M-VAVE's FM-1 V15
+- apps/wifi/bsp/ble_rf_tables.rs, the BLE radio's start-up values, from M-VAVE's FM-1 V15
   firmware as published in https://github.com/m-vave/fm1_open:
     Copyright (c) 2026 Zhuhai Shengke / M-VAVE
     Copyright (c) 2024-2026 Zhuhai Jieli Technology Co., Ltd.

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Decode an app's log read from RAM: the layout is in kit/log.h."""
+"""Decode an app's log read from RAM: the layout is in kit/log.rs."""
 import argparse
 from pathlib import Path
 import struct

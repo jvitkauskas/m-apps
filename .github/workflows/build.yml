@@ -13,11 +13,14 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # The pi32v2 Rust compiler's package is for x86-64 with glibc 2.39 or later.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: true
+          # The decoder's test compares with the C minimp3 of an earlier commit.
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
@@ -25,21 +28,38 @@ jobs:
         id: toolchain
         uses: jvitkauskas/pi32v2-isa/.github/actions/setup-pi32v2@66ac37bb2ae40e5dbbd5588a6a7c2d7baf829d7f
         with:
-          version: pi32v2-23.1.5-2
+          version: pi32v2-23.1.6-2
       - name: Point the build at the toolchain
         shell: bash
         run: echo "TOOLCHAIN=${{ steps.toolchain.outputs.path }}" >> "$GITHUB_ENV"
+      - name: Set up the pi32v2 Rust compiler, built on the toolchain's LLVM (checks the package's SHA-256)
+        shell: bash
+        env:
+          RELEASE: pi32v2-1.100.0-1
+          SHA256: efc89e3cd13b38a22d6698b3d965c0a754bda31c0299afc9b4d73f0a73595690
+        run: |
+          name=pi32v2-rust-${RELEASE#pi32v2-}-linux-x64
+          cd "$RUNNER_TEMP"
+          curl -fsSLo "$name.tar.xz" "https://github.com/jvitkauskas/pi32v2-rust/releases/download/$RELEASE/$name.tar.xz"
+          echo "$SHA256  $name.tar.xz" | sha256sum -c
+          tar -xJf "$name.tar.xz"
+          "$name/bin/rustc" -vV
+          echo "PI32V2_RUST=$RUNNER_TEMP/$name" >> "$GITHUB_ENV"
+      - name: The tests' tools (fsck and mtools for the FAT tests, ffmpeg for the decoder's)
+        run: sudo apt-get update -q && sudo apt-get install -y -q dosfstools mtools ffmpeg
       - name: Build every app for both boards
         run: make -j2
       - name: Tests
         run: make test
-      - name: The system's clang with libFuzzer (the clang first on PATH is the pi32v2 toolchain's)
+      - name: The system's clang with libFuzzer and lld (the clang first on PATH is the pi32v2 toolchain's)
         shell: bash
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q clang
           v=$(/usr/bin/clang --version | sed -nE 's/.*clang version ([0-9]+).*/\1/p' | head -1)
-          sudo apt-get install -y -q "libclang-rt-$v-dev"
+          sudo apt-get install -y -q "libclang-rt-$v-dev" "lld-$v"
+          # The fuzzers link with lld (tests/fuzz_test.py), as clang -fuse-ld=lld finds it.
+          sudo ln -sf "/usr/bin/ld.lld-$v" /usr/local/bin/ld.lld
       - name: Fuzz the parsers, 15 s each
         run: make fuzz FUZZ_SECONDS=15 FUZZ_CC=/usr/bin/clang FUZZ_REQUIRE=1
       - name: The release's tars

@@ -1,14 +1,15 @@
 # SPDX-License-Identifier: MIT
-"""Draw the launcher's screen on the computer (tests/scene_host.c), with the sanitizers: icons through tools/icon.py's
-encoder and apps/picker/qoi.c, the selection moving, and the panel for nothing to start."""
-import os
+"""Draw the launcher's screen on the computer (tests/scene_host.rs), with overflow checks: icons through tools/icon.py's
+encoder and apps/picker/qoi.rs, the selection moving, and the panel for nothing to start."""
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'tools'))
-from icon import SIZE, qoi
+sys.path.insert(0, str(ROOT/'tests'))
+from icon import SIZE, qoi  # noqa: E402
+from host import build as host_build  # noqa: E402
 
 FRAME = 240*240*2
 
@@ -29,10 +30,7 @@ def icon(seed):
 
 with tempfile.TemporaryDirectory() as folder:
     folder = Path(folder)
-    host = folder/'host'
-    subprocess.run([os.environ.get('HOSTCC', 'cc'), '-std=c11', '-g', '-Wall', '-Wextra', '-Werror',
-                    '-fsanitize=address,undefined', f'-I{ROOT}/apps/picker', f'-I{ROOT}/kit', ROOT/'tests/scene_host.c',
-                    ROOT/'apps/picker/scene.c', ROOT/'apps/picker/qoi.c', '-o', host], check=True)
+    host = host_build('scene_host')
     icons = []
     for seed in (3, 5):
         path = folder/f'{seed}.qoi'
