@@ -45,12 +45,19 @@ fn pin_out(pin: u32, high: bool) {
     gpio_output(2, pin, high);
 }
 
-/// Sound going out: the halves to fill come from it, one at a time.
+/// Sound going out: the halves to fill come from it, one at a time. There's one at most; dropping it stops the sound.
 pub struct Audio(());
 
-/// Starts sound, with both halves silent.
-pub fn start() -> Audio {
-    // Safety: the DMA isn't running yet, and nothing else holds the buffer.
+/// Whether an Audio exists, which holds the buffer.
+static RUNNING: Global<bool> = Global::new(false);
+
+/// Starts sound, with both halves silent, or None while it's going already: two would both fill the same halves.
+pub fn start() -> Option<Audio> {
+    if RUNNING.read() {
+        return None;
+    }
+    RUNNING.set(true);
+    // Safety: the DMA isn't running yet, and nothing else holds the buffer: no Audio exists.
     unsafe { BUFFER.get() }.fill(0);
     pin_out(6, false);
     hal_delay_us(5000);
@@ -83,7 +90,7 @@ pub fn start() -> Audio {
     CON0.set(0x800);
     hal_delay_us(5000);
     pin_out(6, true);
-    Audio(())
+    Some(Audio(()))
 }
 
 impl Audio {
@@ -121,10 +128,15 @@ impl Audio {
         CON2.set(0x08);
     }
 
-    pub fn stop(self) {
+    pub fn stop(self) {}
+}
+
+impl Drop for Audio {
+    fn drop(&mut self) {
         CON0.clear(0x800);
         sync_cpu();
         CON2.write(0x0f);
         pin_out(6, false);
+        RUNNING.set(false);
     }
 }

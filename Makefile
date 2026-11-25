@@ -156,11 +156,12 @@ $(eval $(call BOARD_template,any,,0))
 
 # app, board
 define APP_template
-build/$(2)/$(1)/$(1).o: $$(wildcard apps/$(1)/*.rs apps/$(1)/*/*.rs) build/$(2)/rust/libkit.rlib $$($(1)_DEPS) Makefile
+# An app's app.mk sets its opt level, cfgs and stack, so a change there builds it again.
+build/$(2)/$(1)/$(1).o: $$(wildcard apps/$(1)/*.rs apps/$(1)/*/*.rs apps/$(1)/app.mk) build/$(2)/rust/libkit.rlib $$($(1)_DEPS) Makefile
 	@mkdir -p $$(@D)
 	$(RUSTC) $$(call rust_flags,$$(or $$($(1)_OPT),$(RUST_OPT))) --crate-name $(1) --crate-type lib --emit=obj $$($(1)_CFG) \
 		--extern kit=build/$(2)/rust/libkit.rlib -L build/$(2)/rust apps/$(1)/main.rs -o $$@
-build/$(2)/$(1)/app.ld: kit/app.ld.S Makefile
+build/$(2)/$(1)/app.ld: kit/app.ld.S $$(wildcard apps/$(1)/app.mk) Makefile
 	@mkdir -p $$(@D)
 	$(CLANG) -E -P -x c -DAPP_STACK=$$(or $$($(1)_STACK),$(APP_STACK_DEFAULT)) -DAPP_ORIGIN=$$(or $$($(1)_ORIGIN),0x1c30000) -DAPP_LENGTH=$$(or $$($(1)_LENGTH),0x4f000) -DAPP_LOW=$$(or $$($(1)_LOW),0x1c16800) $$< -o $$@
 build/$(2)/$(1).elf: build/$(2)/start.o build/$(2)/$(1)/$(1).o build/$(2)/rust/kit.o build/$(2)/rust/mboot.o $(RUNTIME) build/$(2)/$(1)/app.ld

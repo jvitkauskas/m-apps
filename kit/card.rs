@@ -475,33 +475,57 @@ pub fn stream_start(sector: u32) -> bool {
 }
 
 /// A sector of a stream being read into its buffer by the DMA, which other work can run alongside. Nothing else may
-/// use the card until it's finished.
+/// use the card until it's finished. Dropped, it finishes too, so the buffer is never given back while the DMA writes
+/// it.
 #[must_use]
-pub struct Reading<'a>(&'a mut [u8; 512]);
+pub struct Reading<'a> {
+    data: &'a mut [u8; 512],
+    done: bool,
+}
 
 /// The next sector of the stream, in two halves: this starts it.
-pub fn stream_begin(data: &mut [u8; 512]) -> Option<Reading<'_>> {
+///
+/// # Safety
+/// The Reading is finished or dropped, never leaked (`mem::forget`): that would end the buffer's borrow with the DMA
+/// still writing it.
+pub unsafe fn stream_begin(data: &mut [u8; 512]) -> Option<Reading<'_>> {
     if !block_token(card().stream_at) {
         return None;
     }
-    // Safety: the buffer is the Reading's until it finishes, which waits for the DMA.
+    // Safety: the buffer is the Reading's until it finishes or drops, which waits for the DMA, and the caller doesn't
+    // leak it.
     unsafe { receive_start(data.as_mut_ptr(), 512) };
-    Some(Reading(data))
+    Some(Reading { data, done: false })
 }
 
 impl Reading<'_> {
-    pub fn finish(self) -> bool {
+    fn complete(&mut self) -> bool {
+        if self.done {
+            return true;
+        }
+        self.done = true;
         receive_finish();
         let c = card();
         let at = c.stream_at;
         c.stream_at += 1;
-        block_check(self.0, at)
+        block_check(self.data, at)
+    }
+
+    pub fn finish(mut self) -> bool {
+        self.complete()
+    }
+}
+
+impl Drop for Reading<'_> {
+    fn drop(&mut self) {
+        self.complete();
     }
 }
 
 /// One sector of the stream, whole.
 pub fn stream_read(data: &mut [u8; 512]) -> bool {
-    stream_begin(data).is_some_and(Reading::finish)
+    // Safety: finished here.
+    unsafe { stream_begin(data) }.is_some_and(Reading::finish)
 }
 
 pub fn stream_stop() {
@@ -582,22 +606,37 @@ pub fn write_stream_start(sector: u32) -> bool {
     true
 }
 
-/// A sector of a write stream going out by DMA from its buffer, while other work runs.
+/// A sector of a write stream going out by DMA from its buffer, while other work runs. Dropped, it finishes too, so
+/// the buffer is never changed while the DMA reads it.
 #[must_use]
-pub struct Writing<'a>(core::marker::PhantomData<&'a [u8; 512]>);
+pub struct Writing<'a> {
+    data: core::marker::PhantomData<&'a [u8; 512]>,
+    done: bool,
+}
 
-pub fn write_stream_begin(data: &[u8; 512]) -> Writing<'_> {
+/// # Safety
+/// The Writing is finished or dropped, never leaked (`mem::forget`): that would end the buffer's borrow with the DMA
+/// still reading it.
+pub unsafe fn write_stream_begin(data: &[u8; 512]) -> Writing<'_> {
     card().write_crc = crc16(data);
     x(0xfc);
     SPI1.set(bit(14));
     SPI1_ADR.write(dma_address(data.as_ptr().cast_mut()));
     sync_cpu();
     SPI1_CNT.write(512);
-    Writing(core::marker::PhantomData)
+    Writing { data: core::marker::PhantomData, done: false }
 }
 
 impl Writing<'_> {
-    pub fn finish(self) -> bool {
+    pub fn finish(mut self) -> bool {
+        self.complete()
+    }
+
+    fn complete(&mut self) -> bool {
+        if self.done {
+            return true;
+        }
+        self.done = true;
         let mut i = 0;
         while i < 400_000 && SPI1.read() & bit(15) == 0 {
             i += 1;
@@ -615,6 +654,12 @@ impl Writing<'_> {
         }
         card().write_at = at + 1;
         ok
+    }
+}
+
+impl Drop for Writing<'_> {
+    fn drop(&mut self) {
+        self.complete();
     }
 }
 

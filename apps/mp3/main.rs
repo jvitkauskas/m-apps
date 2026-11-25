@@ -620,7 +620,8 @@ impl Player {
         let mut leave = false;
         self.sound.clear();
         self.sound.muted = false;
-        self.sound.audio = Some(audio::start());
+        // None only if sound were going already, which it isn't here.
+        self.sound.audio = audio::start();
         self.playing_hooks = true;
         self.pix.budget(PLAY_SCREEN_BYTES);
         self.keys_reset();

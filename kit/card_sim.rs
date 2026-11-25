@@ -70,7 +70,9 @@ pub fn stream_start(n: u32) -> bool {
 
 pub struct Reading<'a>(&'a mut [u8; 512]);
 
-pub fn stream_begin(data: &mut [u8; 512]) -> Option<Reading<'_>> {
+/// # Safety
+/// As the unit's: finished or dropped, never leaked.
+pub unsafe fn stream_begin(data: &mut [u8; 512]) -> Option<Reading<'_>> {
     Some(Reading(data))
 }
 
@@ -83,7 +85,8 @@ impl Reading<'_> {
 }
 
 pub fn stream_read(data: &mut [u8; 512]) -> bool {
-    stream_begin(data).is_some_and(Reading::finish)
+    // Safety: finished here.
+    unsafe { stream_begin(data) }.is_some_and(Reading::finish)
 }
 
 pub fn stream_stop() {}
@@ -95,7 +98,9 @@ pub fn write_stream_start(n: u32) -> bool {
 
 pub struct Writing<'a>(&'a [u8; 512]);
 
-pub fn write_stream_begin(data: &[u8; 512]) -> Writing<'_> {
+/// # Safety
+/// As the unit's: finished or dropped, never leaked.
+pub unsafe fn write_stream_begin(data: &[u8; 512]) -> Writing<'_> {
     Writing(data)
 }
 

@@ -102,7 +102,8 @@ fn main(lsb_mhz: u32) -> i32 {
     );
     let mut wave = [0i32; TABLE];
     make_wave(&mut wave);
-    let mut audio = audio::start();
+    // The only start, so there's no sound going already.
+    let Some(mut audio) = audio::start() else { return 1 };
     log!("started, CON0 ", Hex(u32::from(AUDIO_CON0.read()), 0), " CON3 ", Hex(u32::from(AUDIO_CON3.read()), 0));
     let mut gap = 0;
     line(3, WHITE, b"440 HZ");

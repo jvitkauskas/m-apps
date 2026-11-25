@@ -671,7 +671,8 @@ impl Io {
             }
             let mut reading = None;
             if more && streaming {
-                reading = card::stream_begin(next);
+                // Safety: finished below, or dropped on the way out, never leaked.
+                reading = unsafe { card::stream_begin(next) };
                 if reading.is_none() {
                     card::stream_stop();
                     streaming = false;
@@ -680,11 +681,9 @@ impl Io {
             let started = reading.is_some();
             self.stats.sectors_read += 1;
             let sent = self.send_sector(address(out));
-            let mut good = true;
-            if let Some(reading) = reading
-                && !reading.finish()
-            {
-                good = false;
+            // Finished here either way, which ends the stream's hold on `next`.
+            let good = reading.is_none_or(card::Reading::finish);
+            if !good {
                 card::stream_stop();
                 streaming = false;
             }
@@ -778,7 +777,8 @@ impl Io {
                 }
                 return;
             }
-            let writing = card::write_stream_begin(this);
+            // Safety: finished below, never leaked.
+            let writing = unsafe { card::write_stream_begin(this) };
             app::feed();
             if s + 1 == count {
                 let last = writing.finish();
