@@ -5,6 +5,7 @@
 //! Bulk-only mass storage on USB0's MUSB controller. The controller's register sequences are those of m-bootloader's
 //! usb_midi (rust/src/usb_midi.rs), whose comments say what they're from. Its accesses have to be kept apart, or it
 //! babbles on the bus.
+use core::cell::UnsafeCell;
 use kit::hw::{Reg, bit, dma_address, sync_cpu};
 use kit::platform::{hal_delay_us, settle};
 use kit::{Global, app, card};
@@ -114,25 +115,57 @@ fn smk() -> bool {
 pub struct Buffer<const N: usize>(pub [u8; N]);
 
 impl<const N: usize> Buffer<N> {
-    /// A byte the controller wrote: read where it is, each time.
-    fn received(&self, i: usize) -> u8 {
-        // Safety: a byte of this buffer, read through a reference to it.
-        unsafe { (&raw const self.0[i]).read_volatile() }
-    }
-
-    /// The first `M` bytes the controller wrote, read where they are.
-    fn received_copy<const M: usize>(&self) -> [u8; M] {
-        let mut out = [0; M];
-        for (i, o) in out.iter_mut().enumerate() {
-            *o = self.received(i);
-        }
-        out
-    }
-
     fn address(&mut self) -> u32 {
         dma_address(self.0.as_mut_ptr())
     }
 }
+
+/// A buffer the controller's DMA writes whenever reception is armed, which is most of the time, so no reference to it
+/// is ever made: it's kept apart from the state the code borrows, and touched only through pointers, a byte at a
+/// time, volatile.
+#[repr(C, align(4))]
+struct Receive<const N: usize>(UnsafeCell<[u8; N]>);
+
+// Safety: one thread; the controller is the only other party, and only pointers reach the bytes.
+unsafe impl<const N: usize> Sync for Receive<N> {}
+
+impl<const N: usize> Receive<N> {
+    const fn new() -> Self {
+        Receive(UnsafeCell::new([0; N]))
+    }
+
+    fn bytes(&self) -> *mut u8 {
+        self.0.get().cast()
+    }
+
+    fn address(&self) -> u32 {
+        dma_address(self.bytes())
+    }
+
+    /// The first `M` bytes the controller wrote, read where they are.
+    fn received_copy<const M: usize>(&self) -> [u8; M] {
+        const { assert!(M <= N) };
+        let mut out = [0; M];
+        for (i, o) in out.iter_mut().enumerate() {
+            // Safety: byte i of the buffer (M <= N).
+            *o = unsafe { self.bytes().add(i).read_volatile() };
+        }
+        out
+    }
+
+    /// Bytes for the controller to send from here: endpoint 0's answers go out of the buffer its requests come into.
+    fn put(&self, data: &[u8]) {
+        assert!(data.len() <= N);
+        for (i, &b) in data.iter().enumerate() {
+            // Safety: byte i of the buffer, inside it as checked.
+            unsafe { self.bytes().add(i).write_volatile(b) };
+        }
+    }
+}
+
+// The controller's DMA writes past a full packet when receiving, so these have room to spare.
+static EP0: Receive<{ PACKET as usize + 4 }> = Receive::new();
+static COMMAND_BLOCK: Receive<{ PACKET as usize + 4 }> = Receive::new();
 
 /// A static's address for the controller's DMA, which only reads it.
 fn read_address(data: &'static [u8]) -> u32 {
@@ -148,9 +181,7 @@ pub struct Stats {
 
 /// The controller's side, and one command's.
 struct Io {
-    // The controller's DMA writes past a full packet when receiving, so these have room to spare.
-    ep0: Buffer<{ PACKET as usize + 4 }>,
-    command_block: Buffer<{ PACKET as usize + 4 }>,
+    // (Endpoint 0's buffer and the command block are EP0 and COMMAND_BLOCK, which the controller writes at any time.)
     reply: Buffer<32>,
     status_block: Buffer<16>,
     /// What is left of the answer being sent on endpoint 0. (None, not an empty slice, which isn't all zeros: one
@@ -191,8 +222,6 @@ pub struct Msc {
 
 static MSC: Global<Msc> = Global::new(Msc {
     io: Io {
-        ep0: Buffer([0; PACKET as usize + 4]),
-        command_block: Buffer([0; PACKET as usize + 4]),
         reply: Buffer([0; 32]),
         status_block: Buffer([0; 16]),
         ep0_data: None,
@@ -304,9 +333,9 @@ impl Io {
     fn ep0_chunk(&mut self) {
         let data = self.ep0_data.unwrap_or_default();
         let n = data.len().min(PACKET as usize);
-        self.ep0.0[..n].copy_from_slice(&data[..n]);
+        EP0.put(&data[..n]);
         sync_cpu();
-        EP0_ADDRESS.write(self.ep0.address());
+        EP0_ADDRESS.write(EP0.address());
         EP0_COUNT.write(n as u32);
         let left = &data[n..];
         self.ep0_data = Some(left);
@@ -339,13 +368,13 @@ impl Io {
     }
 
     fn rx_arm_command(&mut self) {
-        let to = self.command_block.address();
+        let to = COMMAND_BLOCK.address();
         self.rx_arm(to);
     }
 
     fn endpoints_reset(&mut self) {
         EP1_TX_ADDRESS.write(self.reply.address());
-        EP1_RX_ADDRESS.write(self.command_block.address());
+        EP1_RX_ADDRESS.write(COMMAND_BLOCK.address());
         self.select_endpoint(1);
         sie_write(TX_MAX, 0xff);
         sie_write(TX_CSR1, 0x48);
@@ -414,7 +443,7 @@ impl Io {
             return;
         }
         memory_sync();
-        let setup: [u8; 8] = self.ep0.received_copy();
+        let setup: [u8; 8] = EP0.received_copy();
         let value = u32::from(setup[2]) | u32::from(setup[3]) << 8;
         let index = u32::from(setup[4]);
         let asked = u32::from(setup[6]) | u32::from(setup[7]) << 8;
@@ -511,7 +540,7 @@ impl Io {
             self.address_pending = false;
             self.needs_reset = false;
             self.aborted = true;
-            EP0_ADDRESS.write(self.ep0.address());
+            EP0_ADDRESS.write(EP0.address());
             sie_write(INT_USB_ENABLE, 0x07);
             sie_write(INT_TX1_ENABLE, 0x01);
             sie_write(INT_RX1_ENABLE, 0);
@@ -1011,7 +1040,7 @@ impl Msc {
         }
         let size = sie_read(RX_COUNT1) | sie_read(RX_COUNT2) << 8;
         memory_sync();
-        let block: [u8; 31] = io.command_block.received_copy();
+        let block: [u8; 31] = COMMAND_BLOCK.received_copy();
         if size != 31
             || u32::from_le_bytes([block[0], block[1], block[2], block[3]]) != 0x4342_5355
             || block[13] & 15 != 0
@@ -1052,7 +1081,7 @@ impl Msc {
         hal_delay_us(25000);
         // USB clock: PLL 48 MHz.
         CLOCK_CON1.clear(3);
-        let ep0 = io.ep0.address();
+        let ep0 = EP0.address();
         EP0_ADDRESS.write(ep0);
         for n in 0..3 {
             EP1_RX_ADDRESS.add(8 * n).write(ep0);

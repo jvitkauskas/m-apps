@@ -10,6 +10,7 @@ use crate::hw::{Reg, bit, gpio, sync_cpu};
 use crate::platform::{gpio_output, hal_delay_us};
 use crate::reg::{Reg8, Reg16};
 use crate::Global;
+use core::cell::UnsafeCell;
 
 pub const HALF_FRAMES: usize = 1152;
 pub const HALF_WORDS: usize = 2 * HALF_FRAMES;
@@ -32,8 +33,15 @@ const PLL_STOCK1: u32 = 0x3f50_3026;
 const PLL_CON1_MASK: u32 = 0x07ff_ffff;
 const PENDING_HALF: u8 = 0x80;
 
-/// The DMA's: both halves, which it reads in turn.
-static BUFFER: Global<[i32; 2 * HALF_WORDS]> = Global::new([0; 2 * HALF_WORDS]);
+/// The DMA's: both halves, which it reads in turn. Each half is a cell of its own, so lending the free one never
+/// borrows the one the DMA is reading.
+#[repr(C)]
+struct Halves([UnsafeCell<[i32; HALF_WORDS]>; 2]);
+
+// Safety: one thread, and a half is only lent through the one Audio, while the DMA reads the other.
+unsafe impl Sync for Halves {}
+
+static BUFFER: Halves = Halves([const { UnsafeCell::new([0; HALF_WORDS]) }; 2]);
 
 /// Whether the audio PLL is as firmware and m-bootloader leave it.
 pub fn clock_is_stock() -> bool {
@@ -46,7 +54,10 @@ fn pin_out(pin: u32, high: bool) {
 }
 
 /// Sound going out: the halves to fill come from it, one at a time. There's one at most; dropping it stops the sound.
-pub struct Audio(());
+pub struct Audio {
+    /// The half free_half() gave, until filled().
+    free: Option<usize>,
+}
 
 /// Whether an Audio exists, which holds the buffer.
 static RUNNING: Global<bool> = Global::new(false);
@@ -57,8 +68,10 @@ pub fn start() -> Option<Audio> {
         return None;
     }
     RUNNING.set(true);
-    // Safety: the DMA isn't running yet, and nothing else holds the buffer: no Audio exists.
-    unsafe { BUFFER.get() }.fill(0);
+    for half in &BUFFER.0 {
+        // Safety: the DMA isn't running yet, and nothing else holds the buffer: no Audio exists.
+        unsafe { (*half.get()).fill(0) };
+    }
     pin_out(6, false);
     hal_delay_us(5000);
     CON0.write(0);
@@ -81,8 +94,8 @@ pub fn start() -> Option<Audio> {
     CON3.write((CON3.read() & 0x1f) | 0x80);
     CON1.set(1 << 12);
     CON1.set(1 << 14);
-    // Safety: only for its address.
-    ADR3.write(crate::hw::dma_address(unsafe { BUFFER.get() }.as_mut_ptr().cast()));
+    // Both halves, from the first's address: they're one after the other (repr(C)).
+    ADR3.write(crate::hw::dma_address(BUFFER.0[0].get().cast()));
     pin_out(6, true);
     CON1.clear(1 << 15);
     CON2.write(0x0f);
@@ -90,7 +103,7 @@ pub fn start() -> Option<Audio> {
     CON0.set(0x800);
     hal_delay_us(5000);
     pin_out(6, true);
-    Some(Audio(()))
+    Some(Audio { free: None })
 }
 
 impl Audio {
@@ -110,20 +123,23 @@ impl Audio {
         if pending & PENDING_HALF == 0 {
             return None;
         }
-        Some(usize::from(CON0.read() >> 15 & 1 ^ 1))
+        let which = usize::from(CON0.read() >> 15 & 1 ^ 1);
+        self.free = Some(which);
+        Some(which)
     }
 
-    /// A half, 0 or 1: the one free_half() gave, while the DMA plays the other.
+    /// The half free_half() gave, 0 or 1, while the DMA plays the other. Any other is a panic: the DMA could be reading
+    /// it.
     pub fn half(&mut self, which: usize) -> &mut [i32; HALF_WORDS] {
-        // Safety: borrowed from self, so one at a time. The DMA reads the other half meanwhile.
-        let all = unsafe { BUFFER.get() };
-        let (first, second) = all.split_at_mut(HALF_WORDS);
-        let half = if which == 0 { first } else { second };
-        half.try_into().unwrap_or_else(|_| unreachable!())
+        assert!(self.free == Some(which));
+        // Safety: the free half, borrowed from self so one at a time, and no longer than until filled(), which takes
+        // self too. The DMA reads only the other half meanwhile.
+        unsafe { &mut *BUFFER.0[which].get() }
     }
 
-    /// The half is full.
+    /// The half is full: the DMA may play it from now.
     pub fn filled(&mut self) {
+        self.free = None;
         sync_cpu();
         CON2.set(0x08);
     }
