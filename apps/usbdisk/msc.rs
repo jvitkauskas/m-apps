@@ -166,6 +166,9 @@ impl<const N: usize> Receive<N> {
 // The controller's DMA writes past a full packet when receiving, so these have room to spare.
 static EP0: Receive<{ PACKET as usize + 4 }> = Receive::new();
 static COMMAND_BLOCK: Receive<{ PACKET as usize + 4 }> = Receive::new();
+// What the controller's DMA sends from, the same way: a command's answer, and its status.
+static REPLY: Receive<32> = Receive::new();
+static STATUS_BLOCK: Receive<16> = Receive::new();
 
 /// A static's address for the controller's DMA, which only reads it.
 fn read_address(data: &'static [u8]) -> u32 {
@@ -181,9 +184,8 @@ pub struct Stats {
 
 /// The controller's side, and one command's.
 struct Io {
-    // (Endpoint 0's buffer and the command block are EP0 and COMMAND_BLOCK, which the controller writes at any time.)
-    reply: Buffer<32>,
-    status_block: Buffer<16>,
+    // (Endpoint 0's buffer, the command block, the reply and the status block are statics of their own, which the
+    // controller's DMA reaches by pointer: EP0, COMMAND_BLOCK, REPLY and STATUS_BLOCK.)
     /// What is left of the answer being sent on endpoint 0. (None, not an empty slice, which isn't all zeros: one
     /// byte that isn't zero would put all of this in the image.)
     ep0_data: Option<&'static [u8]>,
@@ -222,8 +224,6 @@ pub struct Msc {
 
 static MSC: Global<Msc> = Global::new(Msc {
     io: Io {
-        reply: Buffer([0; 32]),
-        status_block: Buffer([0; 16]),
         ep0_data: None,
         total_sectors: 0,
         pending_address: 0,
@@ -318,8 +318,10 @@ fn whole(buffer: &mut Sector) -> &mut [u8; 512] {
     buffer.0.first_chunk_mut().unwrap()
 }
 
-fn address(sector: &mut [u8; 512]) -> u32 {
-    dma_address(sector.as_mut_ptr())
+/// A sector buffer's address for the controller's DMA, from the whole buffer: receiving, it can write past the 512
+/// bytes, into the room left for that.
+fn address(sector: &mut Sector) -> u32 {
+    sector.address()
 }
 
 impl Io {
@@ -373,7 +375,7 @@ impl Io {
     }
 
     fn endpoints_reset(&mut self) {
-        EP1_TX_ADDRESS.write(self.reply.address());
+        EP1_TX_ADDRESS.write(REPLY.address());
         EP1_RX_ADDRESS.write(COMMAND_BLOCK.address());
         self.select_endpoint(1);
         sie_write(TX_MAX, 0xff);
@@ -643,9 +645,10 @@ impl Io {
         true
     }
 
-    fn send_own_reply(&mut self, size: u32) {
-        let data = self.reply.address();
-        self.send_reply(data, size);
+    /// Sends these bytes as the command's answer, from REPLY.
+    fn send_own_reply(&mut self, bytes: &[u8]) {
+        REPLY.put(bytes);
+        self.send_reply(REPLY.address(), bytes.len() as u32);
     }
 
     fn send_sector(&mut self, data: u32) -> bool {
@@ -659,13 +662,13 @@ impl Io {
         true
     }
 
-    fn read_singly(&mut self, sector: &mut [u8; 512], first: u32, count: u32) {
+    fn read_singly(&mut self, sector: &mut Sector, first: u32, count: u32) {
         for s in 0..count {
             // The last packet may still be going out of this buffer.
             if !self.tx_wait() {
                 return;
             }
-            if !card::read(first + s, sector) {
+            if !card::read(first + s, whole(sector)) {
                 self.fail(3, 0x11);
                 break;
             }
@@ -682,8 +685,8 @@ impl Io {
     /// The card and USB can work at once, so while one sector goes out, DMA fetches the next into the other buffer.
     fn read_stream(&mut self, sectors: &mut [Sector; 2], first: u32, count: u32) {
         let [a, b] = sectors;
-        let (mut out, mut next) = (whole(a), whole(b));
-        if !card::stream_read(out) {
+        let (mut out, mut next) = (a, b);
+        if !card::stream_read(whole(out)) {
             card::stream_stop();
             self.read_singly(out, first, count);
             return;
@@ -701,7 +704,7 @@ impl Io {
             let mut reading = None;
             if more && streaming {
                 // Safety: finished below, or dropped on the way out, never leaked.
-                reading = unsafe { card::stream_begin(next) };
+                reading = unsafe { card::stream_begin(whole(next)) };
                 if reading.is_none() {
                     card::stream_stop();
                     streaming = false;
@@ -724,7 +727,7 @@ impl Io {
             }
             self.moved += SECTOR;
             app::feed();
-            if more && (!started || !good) && !card::read(first + s + 1, next) {
+            if more && (!started || !good) && !card::read(first + s + 1, whole(next)) {
                 self.fail(3, 0x11);
                 self.finish_in(PACKET);
                 return;
@@ -741,7 +744,7 @@ impl Io {
         if count > 1 && self.total_sectors - (first + count) >= NEAR_THE_END && card::stream_start(first) {
             self.read_stream(sectors, first, count);
         } else {
-            self.read_singly(whole(&mut sectors[0]), first, count);
+            self.read_singly(&mut sectors[0], first, count);
         }
     }
 
@@ -775,12 +778,12 @@ impl Io {
         }
     }
 
-    fn write_singly(&mut self, sector: &mut [u8; 512], first: u32, count: u32) {
+    fn write_singly(&mut self, sector: &mut Sector, first: u32, count: u32) {
         for s in 0..count {
             if !self.receive_sector(address(sector)) {
                 return;
             }
-            if !card::write(first + s, sector) {
+            if !card::write(first + s, whole(sector)) {
                 self.write_failed();
                 return;
             }
@@ -796,7 +799,7 @@ impl Io {
     /// finishes the first, so that a buffer is the card's only while its sector goes out.
     fn write_stream(&mut self, sectors: &mut [Sector; 2], first: u32, count: u32) {
         let [a, b] = sectors;
-        let (mut this, mut other) = (whole(a), whole(b));
+        let (mut this, mut other) = (a, b);
         let mut got = self.receive_sector(address(this));
         let mut s = 0;
         loop {
@@ -807,7 +810,7 @@ impl Io {
                 return;
             }
             // Safety: finished below, never leaked.
-            let writing = unsafe { card::write_stream_begin(this) };
+            let writing = unsafe { card::write_stream_begin(whole(this)) };
             app::feed();
             if s + 1 == count {
                 let last = writing.finish();
@@ -827,12 +830,12 @@ impl Io {
                     self.write_failed();
                     return;
                 }
-                if !card::write(first + s, this) {
+                if !card::write(first + s, whole(this)) {
                     self.write_failed();
                     return;
                 }
                 self.stats.sectors_written += 1;
-                if got && !card::write(first + s + 1, other) {
+                if got && !card::write(first + s + 1, whole(other)) {
                     self.write_failed();
                     return;
                 }
@@ -852,7 +855,7 @@ impl Io {
         if count > 1 && self.total_sectors - (first + count) >= NEAR_THE_END && card::write_stream_start(first) {
             self.write_stream(sectors, first, count);
         } else {
-            self.write_singly(whole(&mut sectors[0]), first, count);
+            self.write_singly(&mut sectors[0], first, count);
         }
     }
 
@@ -893,15 +896,14 @@ impl Io {
             }
             // Request sense.
             0x03 => {
-                let r = &mut self.reply.0;
-                r[..18].fill(0);
+                let mut r = [0u8; 18];
                 r[0] = 0x70;
                 r[2] = asked_key;
                 r[7] = 10;
                 r[12] = asked_code;
                 self.sense_key = 0;
                 self.sense_code = 0;
-                self.send_own_reply(18);
+                self.send_own_reply(&r);
             }
             // Inquiry.
             0x12 => {
@@ -916,14 +918,11 @@ impl Io {
             }
             // Mode sense (6).
             0x1a => {
-                self.reply.0[..4].copy_from_slice(&[3, 0, 0, 0]);
-                self.send_own_reply(4);
+                self.send_own_reply(&[3, 0, 0, 0]);
             }
             // Mode sense (10).
             0x5a => {
-                self.reply.0[..8].fill(0);
-                self.reply.0[1] = 6;
-                self.send_own_reply(8);
+                self.send_own_reply(&[0, 6, 0, 0, 0, 0, 0, 0]);
             }
             // Start stop unit.
             0x1b => {
@@ -936,13 +935,12 @@ impl Io {
             0x1e | 0x2f | 0x35 => self.no_data_expected(),
             // Read format capacities.
             0x23 => {
-                let r = &mut self.reply.0;
-                r[..12].fill(0);
+                let mut r = [0u8; 12];
                 r[3] = 8;
                 r[4..8].copy_from_slice(&self.total_sectors.to_be_bytes());
                 r[8] = 2;
                 r[10] = (SECTOR >> 8) as u8;
-                self.send_own_reply(12);
+                self.send_own_reply(&r);
             }
             // Read capacity (10).
             0x25 => {
@@ -951,9 +949,10 @@ impl Io {
                     self.moved = 0;
                     self.finish_in(0);
                 } else {
-                    self.reply.0[..4].copy_from_slice(&(self.total_sectors - 1).to_be_bytes());
-                    self.reply.0[4..8].copy_from_slice(&SECTOR.to_be_bytes());
-                    self.send_own_reply(8);
+                    let mut r = [0u8; 8];
+                    r[..4].copy_from_slice(&(self.total_sectors - 1).to_be_bytes());
+                    r[4..].copy_from_slice(&SECTOR.to_be_bytes());
+                    self.send_own_reply(&r);
                 }
             }
             // Read (10), write (10).
@@ -1016,13 +1015,13 @@ impl Io {
         if !self.to_host && self.expected != 0 {
             self.rx_arm_command();
         }
-        let s = &mut self.status_block.0;
+        let mut s = [0u8; 13];
         s[0..4].copy_from_slice(&0x5342_5355u32.to_le_bytes());
         s[4..8].copy_from_slice(&self.tag.to_le_bytes());
         s[8..12].copy_from_slice(&(self.expected - self.moved).to_le_bytes());
         s[12] = if self.sense_key != 0 { 1 } else { 0 };
-        let data = self.status_block.address();
-        self.tx_send(data, 13);
+        STATUS_BLOCK.put(&s);
+        self.tx_send(STATUS_BLOCK.address(), 13);
         app::feed();
     }
 }
