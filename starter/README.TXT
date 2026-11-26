@@ -5,9 +5,9 @@ Programs that run from the SD card, without changing the firmware on the unit.
 The same files work on an FM-1 and on an SMK-37.
 
 You need
-- A unit with a card mod: on the FM-1 an m-card board, on the SMK-37 wired
-  by hand.
-- m-bootloader 2.4 or newer on it, 3.0 being the latest:
+- A unit with an m-card board (https://jvitkauskas.github.io/m-apps/card/),
+  or a card slot wired by hand.
+- m-bootloader 2.3 or newer on it, 3.0 being the latest:
   https://github.com/jvitkauskas/m-bootloader
 - An SD card formatted FAT32.
 
