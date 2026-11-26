@@ -18,7 +18,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
+          # recursive: m-unbricker has m-bootloader as its own submodule.
+          submodules: recursive
           # The decoder's test compares with the C minimp3 of an earlier commit.
           fetch-depth: 0
       - uses: actions/setup-python@v5

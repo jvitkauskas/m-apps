@@ -249,7 +249,7 @@ A write has reached the card before the computer is told it succeeded, and data 
 
 [M-Unbricker](https://github.com/jvitkauskas/m-unbricker), from the card: it repairs a broken FM-1 or SMK-37 with this one and a USB-C cable, with no computer. It guides you on the screen: move the cable to the broken unit and switch that on, and it puts its ROM in download mode with JieLi's USB_KEY, writes a fresh m-bootloader, erases the rest, and checks it. Either model can repair either.
 
-It's its own repo, here as the `m-unbricker` submodule, and its own Makefile builds it: what it makes is already an app, so `make` copies it to `build/<board>/unbrick.app`, and `make card` puts it in `/MBOOT/APPS/UNBRICK`. To update it, move the submodule. The launcher starts it with the LSB clock, as m-bootloader's MIDI mode does, which it already handles. It doesn't return: at the end it restarts the unit.
+It's its own repo, here as the `m-unbricker` submodule, and its own Makefile builds it: what it makes is already an app, so `make` copies it to `build/<board>/unbrick.app`, and `make card` puts it in `/MBOOT/APPS/UNBRICK`. It's Rust too, with the same toolchain and Rust compiler, on its own `m-bootloader` submodule, so the submodules have to be checked out recursively (`--recurse-submodules` above does). To update it, move the submodule. A repair writes m-bootloader 3.0. The launcher starts it with the LSB clock, as m-bootloader's MIDI mode does, which it already handles. It doesn't return: at the end it restarts the unit.
 
 Started from the launcher on a unit with a card mod, it has repaired an FM-1 from an SMK-37 Pro and an SMK-37 Pro from an FM-1.
 

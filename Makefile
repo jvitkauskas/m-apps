@@ -182,10 +182,15 @@ build/%/LAUNCH.BIN: build/%/picker.elf tools/launch.py
 	python3 tools/launch.py $* build/$*/picker.raw $@
 
 # M-Unbricker is its own repo, here as the m-unbricker submodule, and its own Makefile builds it: what it makes is
-# already an app. It's on the card as /MBOOT/APPS/UNBRICK, with apps/unbrick's META.TXT and ICON.QOI.
-build/%/unbrick.app: FORCE
+# already an app. It's Rust too, on its own m-bootloader submodule (so check out submodules recursively), with this
+# toolchain and Rust compiler. It's on the card as /MBOOT/APPS/UNBRICK, with apps/unbrick's META.TXT and ICON.QOI.
+# One make of it builds all three boards: three at once (make -j) would share its build/rust/ and race.
+build/unbrick.stamp: FORCE
+	$(MAKE) -C m-unbricker TOOLCHAIN=$(abspath $(TOOLCHAIN)) PI32V2_RUST=$(abspath $(PI32V2_RUST)) \
+		build/m-unbricker-fm1.bin build/m-unbricker-smk37.bin build/m-unbricker-any.bin
+	@mkdir -p $(@D) && touch $@
+build/%/unbrick.app: build/unbrick.stamp
 	@mkdir -p $(@D)
-	$(MAKE) -C m-unbricker TOOLCHAIN=$(abspath $(TOOLCHAIN)) build/m-unbricker-$*.bin
 	cp m-unbricker/build/m-unbricker-$*.bin $@
 FORCE:
 .PHONY: FORCE

@@ -1,3 +1,3 @@
 name=Unbricker
 about=Revive a bricked unit over USB-C
-version=0.5
+version=0.6
