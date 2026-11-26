@@ -98,6 +98,7 @@ build/host/%: tests/%.rs build/host/libkit.rlib $(wildcard apps/*/*.rs) Makefile
 test:
 	python3 tests/applog_test.py
 	python3 tests/app_tar_test.py
+	python3 tests/card_zip_test.py
 	python3 tests/fat_write_test.py
 	$(foreach t,$(APP_TESTS),python3 $(t) &&) true
 # What an app adds to the build: apps/<app>/app.mk, with its tests in APP_TESTS, and anything its build makes.
@@ -217,9 +218,19 @@ card: build/$(BOARD)/MENU.BIN build/$(BOARD)/LAUNCH.BIN $(foreach a,$(CARD_APPS)
 		if [ -f apps/$(a)/ICON.QOI ]; then cp apps/$(a)/ICON.QOI $$d/; fi; \
 		if [ -f apps/$(a)/NOTICE.TXT ]; then $(call notice,$(a),$$d/NOTICE.TXT); fi;)
 
+# make starter: build/release/m-apps-sd-card.zip, a first card for someone new to m-apps, for either unit: the
+# launcher and STARTER_APPS, all one build for both (build/any), with starter/README.TXT and a sample /WIFI.TXT
+# (starter/WIFI.TXT), to unpack onto a FAT32 card's root. Made the same way each time (tools/card_zip.py).
+STARTER_APPS := mp3 slots unbrick usbdisk wifi
+starter:
+	$(MAKE) card BOARD=any CARD_APPS="$(STARTER_APPS)"
+	cp starter/README.TXT starter/WIFI.TXT build/any/card/
+	mkdir -p build/release
+	python3 tools/card_zip.py build/release/m-apps-sd-card.zip build/any/card
+
 # make release: build/release, what a release carries for the store: <app>-<board>.tar, an app's folder for
 # /MBOOT/APPS/<APP>/, and mboot-<board>.tar, MENU.BIN, LAUNCH.BIN and the launcher's NOTICE.TXT for /MBOOT, each a
-# plain tar (tools/app_tar.py), and SHA256SUMS.
+# plain tar (tools/app_tar.py); the starter card (make starter); and SHA256SUMS.
 BOARDS := fm1 smk37
 release:
 	rm -rf build/release
@@ -232,6 +243,7 @@ release:
 		rm -rf build/$$b/mboot; mkdir -p build/$$b/mboot; cp build/$$b/MENU.BIN build/$$b/LAUNCH.BIN build/$$b/card/MBOOT/NOTICE.TXT build/$$b/mboot/; \
 		python3 tools/app_tar.py build/release/mboot-$$b.tar build/$$b/mboot; \
 	done
-	cd build/release && ls *.tar | LC_ALL=C sort | xargs sha256sum > SHA256SUMS
+	$(MAKE) starter
+	cd build/release && ls *.tar *.zip | LC_ALL=C sort | xargs sha256sum > SHA256SUMS
 
-.PHONY: all clean test fuzz run log card release
+.PHONY: all clean test fuzz run log card starter release

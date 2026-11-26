@@ -4,7 +4,7 @@ Programs that run from RAM on the M-VAVE FM-1 and SMK-37, without changing the f
 
 An app is one file. The same file can be started from an SD card, over MIDI, or with M-Flasher's `run-ram`. The format and the rules are in [m-bootloader's SPEC, §11.8](https://github.com/jvitkauskas/m-bootloader/blob/main/docs/SPEC.md).
 
-**Status:** early. `hello` and `usbdisk` have run on an FM-1 and an SMK-37, and the `picker` launcher on an SMK-37. There are no releases yet, so build from source.
+**Status:** early. `hello` and `usbdisk` have run on an FM-1 and an SMK-37, and the `picker` launcher on an SMK-37. There are no releases yet: build from source, or take the starter card from a CI run (see `picker` below).
 
 - **`run-ram`:** `make run` below uses this. It needs M-Flasher 0.9.2 or newer.
 - **MIDI:** m-bootloader 2.2's MIDI mode and RAM stage can load and run an app, but nothing public sends one yet. M-Flasher's page has no button for it.
@@ -149,7 +149,9 @@ Each app has a folder of its own in `/MBOOT/APPS`, as the Homebrew Channel has t
 /MBOOT/APPS/MP3/...            the app's own files
 ```
 
-`make card BOARD=smk37` (or `fm1`) builds all of that in `build/smk37/card/MBOOT`, for these apps: hello, usbdisk, slots, tone, mp3 and unbrick. Copy it to the card's root.
+`make card BOARD=smk37` (or `fm1`) builds all of that in `build/smk37/card/MBOOT`, for these apps: hello, usbdisk, slots, tone, mp3, unbrick and wifi. Copy it to the card's root.
+
+**A first card:** `make starter` builds `build/release/m-apps-sd-card.zip` for someone new to m-apps. It holds the launcher and the MP3 player, Slots, Unbricker, USB Disk and WiFi, all one build for both units (`build/any`), with a sample `/WIFI.TXT` and a `README.TXT` on setting up the card (`starter/`). Unpacked onto a FAT32 card's root, it's ready. `make release` makes it too, so CI builds it on every push: a run's `m-apps-sd-card-<commit>` artifact downloads as a zip of the card's root, and a tag's release has `m-apps-sd-card.zip`.
 
 `META.TXT` is plain text, lines of `key=value`, and every line is optional:
 

@@ -43,6 +43,10 @@ fn same(got: &[u8], want: &[u8]) -> bool {
 
 fn main() {
     let mut l = List::new();
+    // The sample on the starter card (make starter): one network, joinable, and the one in use.
+    read_text(&mut l, include_bytes!("../starter/WIFI.TXT"));
+    check!(l.count == 1 && l.in_use == 0 && l.skipped == 0);
+    check!(l.net[0].ssid() == b"My network" && l.net[0].pass() == b"my password here");
     // As a person writes it: CRLF, a BOM, comments, spaces and = kept in values, use= after the networks.
     read_text(&mut l, b"\xef\xbb\xbf# mine\r\n\r\nssid=Home Net\r\npassword=a = b c d\r\n\r\nssid=Shed\r\npassword=12345678\r\nuse=Shed\r\n");
     check!(l.count == 2 && l.in_use == 1 && l.skipped == 0);

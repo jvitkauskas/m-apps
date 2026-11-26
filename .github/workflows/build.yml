@@ -70,6 +70,12 @@ jobs:
           name: m-apps-${{ github.sha }}
           if-no-files-found: error
           path: build/release/
+      # The starter card unpacked: GitHub zips an artifact, so this one downloads as a zip of the card's root.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: m-apps-sd-card-${{ github.sha }}
+          if-no-files-found: error
+          path: build/any/card/
 
   release:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
