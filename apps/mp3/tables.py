@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""spectrum_tables.h: the FFT's sines and the Hann window, in Q15. `python3 apps/mp3/tables.py`."""
+"""spectrum_tables.rs: the FFT's sines and the Hann window, in Q15. `python3 apps/mp3/tables.py`."""
 import math
 from pathlib import Path
 
@@ -17,18 +17,18 @@ def rows(values):
 cos = [q15(math.cos(2*math.pi*k/N)) for k in range(N//2)]
 sin = [q15(math.sin(2*math.pi*k/N)) for k in range(N//2)]
 hann = [q15(0.5-0.5*math.cos(2*math.pi*n/(N-1))) for n in range(N//2)]
-text = f'''/* Made by tables.py. */
-#include <stdint.h>
-#define SPECTRUM_N {N}
-static const int16_t fft_cos[{N//2}] = {{
-{rows(cos)}
-}};
-static const int16_t fft_sin[{N//2}] = {{
-{rows(sin)}
-}};
-/* The first half; the window is symmetric. */
-static const int16_t hann[{N//2}] = {{
-{rows(hann)}
-}};
+text = f'''// SPDX-License-Identifier: MIT
+//! Made by tables.py.
+pub const N: usize = {N};
+pub static FFT_COS: [i16; {N//2}] = [
+{rows(cos)},
+];
+pub static FFT_SIN: [i16; {N//2}] = [
+{rows(sin)},
+];
+/// The first half; the window is symmetric.
+pub static HANN: [i16; {N//2}] = [
+{rows(hann)},
+];
 '''
-(Path(__file__).parent/'spectrum_tables.h').write_text(text)
+(Path(__file__).parent/'spectrum_tables.rs').write_text(text)

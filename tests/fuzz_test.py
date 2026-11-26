@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: MIT
-"""Fuzzes the parsers that read what comes from a card or a file, with libFuzzer, AddressSanitizer and UBSan, for a few
-seconds each (FUZZ_SECONDS). Needs clang with libFuzzer; without it, says so and passes. A crash leaves its input in
-build/fuzz/<name>/, and the run fails. tests/fuzz/found/<name>/ keeps the inputs that found a bug, which every run
-starts from. FUZZ_REQUIRE=1 makes a missing libFuzzer a failure (CI).
+"""Fuzzes the parsers that read what comes from a card or the radio, with libFuzzer, for a few seconds each
+(FUZZ_SECONDS). Each harness is tests/fuzz/<name>_fuzz.rs, built with the pi32v2 Rust compiler (PI32V2_RUST, as the
+build has it: a nightly that has x86_64's std too) with coverage (LLVM's sancov) and overflow checks and debug
+assertions on, and linked by the computer's clang (FUZZ_CC), whose -fsanitize=fuzzer gives libFuzzer's main. A panic
+aborts, which libFuzzer counts as a crash. Without either, says so and passes; FUZZ_REQUIRE=1 makes that a failure (CI).
+A crash leaves its input in build/fuzz/<name>/, and the run fails. tests/fuzz/found/<name>/ keeps the inputs that found
+a bug, which every run starts from.
 
   fuzz_test.py [SECONDS] [NAME...]"""
 import os
@@ -14,13 +17,29 @@ import subprocess
 import sys
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT/'build'/'fuzz'
+LIB = OUT/'lib'
 CC = os.environ.get('FUZZ_CC', 'clang')
-FLAGS = ['-g', '-O1', '-std=gnu99', '-fsanitize=fuzzer,address,undefined', '-fno-sanitize-recover=all']
+RUSTC = ROOT/os.environ.get('PI32V2_RUST', 'pi32v2-rust')/'bin'/'rustc'
+# -O1, as the C fuzzers were built. libFuzzer's coverage: edges (level 3, and 4 for indirect calls), as 8-bit counters
+# inline, a table of where each is (-print_pcs, -print_coverage), and comparisons, so it can find the bytes a parser
+# compares with. No AddressSanitizer: the code fuzzed is safe Rust, bounds-checked, but for kit/card_sim.rs's pointer
+# into the image, which it checks against the card's size first (README). One codegen unit, as the apps have: with more,
+# pi32v2-rust 1.100.0-1's rustc crashes (SIGSEGV) running sancov on them.
+RUST_FLAGS = ['--edition', '2024', '-Copt-level=1', '-Ccodegen-units=1', '-Cdebuginfo=1', '-Cdebug-assertions=on', '-Coverflow-checks=on',
+              '-Cpanic=abort', '-Cpasses=sancov-module', '-Cllvm-args=-sanitizer-coverage-level=4',
+              '-Cllvm-args=-sanitizer-coverage-inline-8bit-counters', '-Cllvm-args=-sanitizer-coverage-pc-table',
+              '-Cllvm-args=-sanitizer-coverage-trace-compares']
+# Linked by lld (clang's -fuse-ld=lld), as the computer's rustc links the tests with its own (rust-lld), which this one
+# hasn't: rustc has the linker keep every #[no_mangle] function of the kit and the drivers (symbols.o), and GNU ld then
+# wants the symbols that their start-up for the unit (app_start, installer_main) takes from the linker script, where lld
+# drops those functions as unused. (LTO would drop them too, but loses the kit's coverage.)
+LINK_FLAGS = [f'-Clinker={shutil.which(CC) or CC}', '-Clink-arg=-fsanitize=fuzzer', '-Clink-arg=-fuse-ld=lld']
+MB = ROOT/'m-bootloader/rust/src'
 
 def jpeg_seeds(folder):
-    """The sample pictures in apps/jpeg/images.h."""
-    text = (ROOT/'apps/jpeg/images.h').read_text()
-    for i, m in enumerate(re.finditer(r'\{([0-9,\s]+)\}', text)):
+    """The sample pictures in apps/jpeg/images.rs."""
+    text = (ROOT/'apps/jpeg/images.rs').read_text()
+    for i, m in enumerate(re.finditer(r'Aligned\(\[([0-9,\s]+)\]\)', text)):
         data = bytes(int(x) for x in m.group(1).split(',') if x.strip())
         if data[:2] == b'\xff\xd8':
             (folder/f'image{i}.jpg').write_bytes(data)
@@ -130,38 +149,76 @@ def frames_seeds(folder):
     key = bytes([2, 3, 0, 95, 2, 0x00, 0x8a, 0, 16]) + bytes(8) + bytes(range(32)) + bytes(16+8+8+16+2)
     (folder/'eapol').write_bytes(b'\x00' + hdr + llc + b'\x88\x8e' + key)
 
+# name: its seeds, and the longest input (16 KiB if not given)
 FUZZERS = {
-    'jpeg': (['tests/fuzz/jpeg_fuzz.c'], [], jpeg_seeds),
-    'wifi_list': (['tests/fuzz/wifi_list_fuzz.c', 'apps/wifi/wifilist.c'], ['-Iapps/wifi'], wifi_seeds),
-    'frames': (['tests/fuzz/frames_fuzz.c', 'apps/wifi/frames.c', 'apps/wifi/wifi_ip.c', 'apps/wifi/wifi_sta.c',
-                'apps/wifi/wifi_crypto.c'], ['-Itests/fuzz/fake', '-Iapps/wifi'], frames_seeds),
-    'qoi': (['tests/fuzz/qoi_fuzz.c', 'apps/picker/qoi.c'], ['-Iapps/picker'], qoi_seeds),
-    'meta': (['tests/fuzz/meta_fuzz.c', 'kit/load.c', 'm-bootloader/src/core.c'],
-             ['-Ikit', '-Iapps/picker', '-idirafter', 'm-bootloader/include', '-DPLATFORM_SIM'], meta_seeds),
-    'fat': (['tests/fuzz/fat_fuzz.c', 'kit/fat.c', 'kit/load.c', 'apps/picker/catalog.c', 'm-bootloader/src/core.c'],
-            ['-Ikit', '-Iapps/picker', '-idirafter', 'm-bootloader/include', '-DPLATFORM_SIM'], fat_seeds, 96*1024),
+    'jpeg': (jpeg_seeds,),
+    'wifi_list': (wifi_seeds,),
+    'frames': (frames_seeds,),
+    'qoi': (qoi_seeds,),
+    'meta': (meta_seeds,),
+    'fat': (fat_seeds, 96*1024),
 }
+
+
+def rustc(*args):
+    return subprocess.run([RUSTC, *RUST_FLAGS, *args], cwd=ROOT, capture_output=True, text=True)
+
+
+def libraries():
+    """The drivers and the kit, as tests/host.py's are (the FM-1's, a card in memory), with coverage too; again only
+    when a source has changed."""
+    sources = [*MB.rglob('*.rs'), *(ROOT/'kit').glob('*.rs'), RUSTC, Path(__file__)]
+    newest = max(p.stat().st_mtime for p in sources)
+    LIB.mkdir(parents=True, exist_ok=True)
+    for name, args in [('mboot', ['--cfg', 'panel_test', MB/'lib.rs']),
+                       ('kit', ['--cfg', 'board="fm1"', '--extern', f'mboot={LIB}/libmboot.rlib', ROOT/'kit/lib.rs'])]:
+        rlib = LIB/f'lib{name}.rlib'
+        if rlib.exists() and rlib.stat().st_mtime >= newest:
+            continue
+        built = rustc('--crate-name', name, '--crate-type', 'rlib', '-L', LIB, *args, '-o', rlib)
+        if built.returncode:
+            sys.exit(f'fuzz: {name} failed to build\n{built.stderr}')
+        newest = max(newest, rlib.stat().st_mtime)
+
+
+def tools():
+    """What's missing to fuzz, and why, or None: a Rust harness built with coverage, linked with libFuzzer, and run
+    once."""
+    if not RUSTC.exists():
+        return f'the pi32v2 Rust compiler not found at {RUSTC} (PI32V2_RUST names it)', ''
+    if not shutil.which(CC):
+        return f'{CC} not found (FUZZ_CC names another clang)', ''
+    probe = OUT/'probe'
+    (OUT/'probe.rs').write_text('#![no_main]\n#[unsafe(no_mangle)]\n'
+                                'pub extern "C" fn LLVMFuzzerTestOneInput(_: *const u8, _: usize) -> i32 {\n    0\n}\n')
+    built = rustc(*LINK_FLAGS, OUT/'probe.rs', '-o', probe)
+    if built.returncode:
+        return f'{RUSTC} and {CC} with libFuzzer and lld could not build a fuzzer (FUZZ_CC names another clang)', \
+            built.stderr
+    ran = subprocess.run([probe, '-runs=1'], capture_output=True, text=True)
+    if ran.returncode:
+        return f'a fuzzer built with {CC} did not run', ran.stderr
+    return None, ''
+
 
 def main():
     args = sys.argv[1:]
     seconds = int(args.pop(0)) if args and args[0].isdigit() else int(os.environ.get('FUZZ_SECONDS', '10'))
     names = args or list(FUZZERS)
-    probe = OUT/'probe'
     OUT.mkdir(parents=True, exist_ok=True)
-    (OUT/'probe.c').write_text('#include <stddef.h>\n#include <stdint.h>\nint LLVMFuzzerTestOneInput(const uint8_t *d, size_t n) { return 0; }\n')
-    probing = subprocess.run([CC, *FLAGS, OUT/'probe.c', '-o', probe], capture_output=True, text=True) \
-        if shutil.which(CC) else None
-    if not probing or probing.returncode:
-        print(f'fuzz: skipped, {CC} with libFuzzer not found (FUZZ_CC names another clang)')
-        if probing:
-            print(probing.stderr[-2000:])
+    missing, why = tools()
+    if missing:
+        print(f'fuzz: skipped, {missing}')
+        if why:
+            print(why[-2000:])
         # FUZZ_REQUIRE=1 (CI): no fuzzing is a failure, not a pass.
         if os.environ.get('FUZZ_REQUIRE') == '1':
             sys.exit(1)
         return
+    libraries()
     failed = []
     for name in names:
-        sources, flags, seeds, *most = FUZZERS[name]
+        seeds, *most = FUZZERS[name]
         folder = OUT/name
         corpus = folder/'corpus'
         corpus.mkdir(parents=True, exist_ok=True)
@@ -170,19 +227,35 @@ def main():
         for found in sorted((ROOT/'tests/fuzz/found'/name).glob('*')):
             shutil.copy(found, corpus/found.name)
         binary = folder/name
-        subprocess.run([CC, *FLAGS, *flags, *[ROOT/s for s in sources], '-o', binary], check=True, cwd=ROOT)
-        run = subprocess.run([binary, corpus, f'-max_total_time={seconds}', f'-max_len={most[0] if most else 16384}', '-timeout=10', f'-artifact_prefix={folder}/',
-                              '-print_final_stats=1'], capture_output=True, text=True)
+        built = rustc('--crate-name', f'{name}_fuzz', '--crate-type', 'bin', '--extern', f'kit={LIB}/libkit.rlib',
+                      '-L', LIB, *LINK_FLAGS, f'tests/fuzz/{name}_fuzz.rs', '-o', binary)
+        if built.returncode:
+            sys.exit(f'fuzz {name}: failed to build\n{built.stderr}')
+        if built.stderr:
+            print(built.stderr)
+        run = subprocess.run([binary, corpus, f'-max_total_time={seconds}', f'-max_len={most[0] if most else 16384}',
+                              '-timeout=10', f'-artifact_prefix={folder}/', '-print_final_stats=1'],
+                             capture_output=True, text=True)
         stats = [l for l in run.stderr.splitlines() if l.startswith('stat::number_of_executed_units')]
         runs = stats[-1].split(':')[-1].strip() if stats else '?'
+        # Coverage when the corpus had been run, and at the end: what this run added.
+        progress = [m for m in re.finditer(r'^#\d+\s+(\w+)\s+cov: (\d+) ft: (\d+)', run.stderr, re.M)]
+        start = next((m for m in progress if m.group(1) == 'INITED'), None)
+        cov = f', cov {start.group(2)} ft {start.group(3)} -> cov {progress[-1].group(2)} ft {progress[-1].group(3)}' \
+            if start else ''
         if run.returncode:
             failed.append(name)
             print(f'fuzz {name}: FAILED after {runs} runs; the input is in {folder}/')
-            print('\n'.join(l for l in run.stderr.splitlines() if 'ERROR' in l or 'SUMMARY' in l or ' #' in l[:6] or 'in ' in l[:40])[:3000])
+            lines = run.stderr.splitlines()
+            # The panic's place and what it said, libFuzzer's verdict, the stack, and where the input went.
+            said = {i+1 for i, l in enumerate(lines) if ' panicked at ' in l}
+            print('\n'.join(l for i, l in enumerate(lines) if i in said or 'panicked' in l or 'ERROR' in l or
+                            'SUMMARY' in l or ' #' in l[:6] or 'in ' in l[:40] or 'Test unit written' in l)[:3000])
         else:
-            print(f'fuzz {name}: OK, {runs} runs in {seconds} s')
+            print(f'fuzz {name}: OK, {runs} runs in {seconds} s{cov}')
     if failed:
         sys.exit(1)
+
 
 if __name__ == '__main__':
     main()

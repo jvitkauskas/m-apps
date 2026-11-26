@@ -3,7 +3,7 @@ This file was built from @SOURCE@
 
 Most of it is MIT, Copyright (c) 2026 Julius Vitkauskas (LICENSE in the source).
 
-The sound output (kit/audio.c and kit/audio.h) is MPL-2.0, adapted from felucca-bsp
+The sound output (kit/audio.rs) is MPL-2.0, adapted from felucca-bsp
 (https://github.com/hugelton/felucca-bsp):
   Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
   Copyright (C) 2026 Kerem Kilic (Ellic Studio)

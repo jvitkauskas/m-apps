@@ -6,7 +6,7 @@
 .type app_entry,@function
 app_entry:
     goto app_enter
-/* The header (kit/app_launch.h), at offset 4, which the entry jumps over. */
+/* The header (kit/app.rs: HEADER_MAGIC), at offset 4, which the entry jumps over. */
 .balign 4
     .ascii "MAPP"
     .byte 1, 0, 0, 0

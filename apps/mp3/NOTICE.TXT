@@ -3,12 +3,13 @@ This file was built from @SOURCE@
 
 Most of it is MIT, Copyright (c) 2026 Julius Vitkauskas (LICENSE in the source).
 
-The sound output (kit/audio.c and kit/audio.h) is MPL-2.0, adapted from felucca-bsp
+The sound output (kit/audio.rs) is MPL-2.0, adapted from felucca-bsp
 (https://github.com/hugelton/felucca-bsp):
   Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
   Copyright (C) 2026 Kerem Kilic (Ellic Studio)
 Its source is in m-apps at the address above. The MPL-2.0 is at https://mozilla.org/MPL/2.0/
 and in the source as LICENSES/MPL-2.0.txt.
 
-The MP3 decoder is minimp3 (https://github.com/lieff/minimp3), dedicated to the public
-domain (CC0-1.0) by its authors.
+The MP3 decoder (apps/mp3/minimp3.rs) is a Rust port of minimp3
+(https://github.com/lieff/minimp3), which its authors dedicated to the public domain
+(CC0-1.0). The port is CC0-1.0 too.

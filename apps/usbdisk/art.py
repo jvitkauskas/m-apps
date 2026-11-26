@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""art.h: usbdisk's pictures, drawn here with Pillow at four times their size and scaled down, so their edges are
+"""art.rs: usbdisk's pictures, drawn here with Pillow at four times their size and scaled down, so their edges are
 smooth. `python3 apps/usbdisk/art.py`. Each sprite is RGB565 with 4-bit alpha."""
 from pathlib import Path
 import sys
@@ -113,19 +113,20 @@ def emit(name, im):
 
     def rows(vals, n, fmt):
         return ',\n    '.join(', '.join(fmt.format(v) for v in vals[i:i+n]) for i in range(0, len(vals), n))
-    return [f'#define {name.upper()}_W {w}', f'#define {name.upper()}_H {h}',
-            f'static const uint16_t {name}_rgb[{w*h}] = {{\n    {rows(colours, w, "0x{:04x}")}\n}};',
-            f'static const uint8_t {name}_alpha[{len(packed)}] = {{\n    {rows(packed, 24, "0x{:02x}")}\n}};']
+    upper = name.upper()
+    return [f'pub const {upper}_W: i32 = {w};', f'pub const {upper}_H: i32 = {h};',
+            f'pub static {upper}_RGB: [u16; {w*h}] = [\n    {rows(colours, w, "0x{:04x}")},\n];',
+            f'pub static {upper}_ALPHA: [u8; {len(packed)}] = [\n    {rows(packed, 24, "0x{:02x}")},\n];']
 
 
 def main():
-    out = ['/* Made by art.py. */', '#include <stdint.h>']
+    out = ['// SPDX-License-Identifier: MIT', '//! Made by art.py.']
     for name, make in SPRITES:
         out += emit(name, make())
-    out += ["/* Where the laptop's screen is in it, and where the cable meets each picture, from its top. */",
-            '#define LAPTOP_SCREEN_X 14', '#define LAPTOP_SCREEN_Y 4', '#define LAPTOP_SCREEN_W 72',
-            '#define LAPTOP_SCREEN_H 48', '#define LAPTOP_PORT_Y 60', '#define SD_CARD_PORT_Y 56']
-    (HERE/'art.h').write_text('\n'.join(out)+'\n')
+    out += ["// Where the laptop's screen is in it, and where the cable meets each picture, from its top.",
+            'pub const LAPTOP_SCREEN_X: i32 = 14;', 'pub const LAPTOP_SCREEN_Y: i32 = 4;', 'pub const LAPTOP_SCREEN_W: i32 = 72;',
+            'pub const LAPTOP_SCREEN_H: i32 = 48;', 'pub const LAPTOP_PORT_Y: i32 = 60;', 'pub const SD_CARD_PORT_Y: i32 = 56;']
+    (HERE/'art.rs').write_text('\n'.join(out)+'\n')
     if len(sys.argv) > 1:                      # a preview of them all, for looking at
         sheet = Image.new('RGBA', (270, 76), (240, 244, 250, 255))
         x = 4

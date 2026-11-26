@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Run kit/log.c on the computer, and check tools/applog.py against what it writes."""
-import os
+"""Run kit/log.rs on the computer, and check tools/applog.py against what it writes."""
 from pathlib import Path
 import subprocess
 import sys
@@ -8,13 +7,13 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'tools'))
 from applog import CAPACITY, CRASHED, RETURNED, RUNNING, SIZE, decode, describe
+sys.path.insert(0, str(ROOT/'tests'))
+from host import build as host_build  # noqa: E402
 
 TRAILER = b'APP1\x12\x34\x01\x01'
 with tempfile.TemporaryDirectory() as folder:
     folder = Path(folder)
-    subprocess.run([os.environ.get('HOSTCC', 'cc'), '-std=c11', '-Wall', '-Wextra', '-Werror', '-Wno-format',
-                    '-fsanitize=address,undefined', ROOT/'tests/log_host.c', '-o', folder/'host'], check=True)
-    subprocess.run([folder/'host', folder/'a', folder/'b', folder/'c', folder/'d'], check=True)
+    subprocess.run([host_build('log_host'), folder/'a', folder/'b', folder/'c', folder/'d'], check=True)
     running, returned, wrapped, crashed = (decode((folder/name).read_bytes(), b'x'+TRAILER) for name in 'abcd')
 
 assert running['same_app'] and running['state'] == RUNNING and running['lost'] == 0

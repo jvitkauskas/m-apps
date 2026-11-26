@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""The jpeg app's pictures, drawn here (nothing is copied), as apps/jpeg/images.h: python3 apps/jpeg/images.py apps/jpeg
+"""The jpeg app's pictures, drawn here (nothing is copied), as apps/jpeg/images.rs: python3 apps/jpeg/images.py apps/jpeg
 [REFERENCE_DIR]. With a second argument, each JPEG goes there too, to compare a decode with on a computer."""
 import io, math, sys
 from PIL import Image, ImageDraw, ImageFont
@@ -38,16 +38,19 @@ images = [
     ('480X320', jpeg(picture(480, 320), quality=90, subsampling=2)),
 ]
 out = sys.argv[1]
-with open(out + '/images.h', 'w') as f:
-    f.write('/* Made by apps/jpeg/images.py. */\n#include <stdint.h>\n')
+with open(out + '/images.rs', 'w') as f:
+    f.write('// SPDX-License-Identifier: MIT\n//! Made by apps/jpeg/images.py: the pictures the app decodes, as JPEG files.\nuse kit::Aligned;\n\n')
+    f.write('/// A picture: its name, for the log and the screen, and its file.\n'
+            "pub struct Picture {\n    pub name: &'static str,\n    pub data: &'static [u8],\n}\n\n")
     for i, (name, data) in enumerate(images):
-        f.write(f'static const uint8_t image{i}[{len(data)}] __attribute__((aligned(4))) = {{')
-        f.write(','.join(str(x) for x in data))
-        f.write('};\n')
-    f.write('static const struct { const char *name; const uint8_t *data; unsigned size; } images[] = {\n')
+        f.write(f'static IMAGE{i}: Aligned<{len(data)}> = Aligned([\n')
+        for at in range(0, len(data), 24):
+            f.write('    ' + ', '.join(str(x) for x in data[at:at+24]) + ',\n')
+        f.write(']);\n')
+    f.write(f'\npub static IMAGES: [Picture; {len(images)}] = [\n')
     for i, (name, data) in enumerate(images):
-        f.write(f'    {{"{name}", image{i}, {len(data)}}},\n')
-    f.write('};\n')
+        f.write(f'    Picture {{ name: "{name}", data: &IMAGE{i}.0 }},\n')
+    f.write('];\n')
 for i, (name, data) in enumerate(images):
     if len(sys.argv) > 2:
         open(f'{sys.argv[2]}/ref{i}.jpg', 'wb').write(data)

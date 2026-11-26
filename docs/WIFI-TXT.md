@@ -53,9 +53,9 @@ Someone may have written the file by hand, and another program may have added se
 - Removing the last network can leave an empty file, which is a file with no networks.
 - Set `use=` where it is. If there's none, add one before the first network.
 - Add a new network at the end.
-- Replace the file in one step, if you can: write the new text as a new file, then point the directory entry at it, so losing power leaves either the old file or the new one. m-apps' `kit/fat.c` does this (`fat_reserve`, `fat_write`, `fat_swap`).
+- Replace the file in one step, if you can: write the new text as a new file, then point the directory entry at it, so losing power leaves either the old file or the new one. m-apps' `kit/fat.rs` does this (`Volume::reserve`, `write`, `swap`).
 
-`apps/wifi/wifilist.c` in m-apps reads and writes it this way, and `tests/wifi_list_host.c` shows what's kept.
+`apps/wifi/wifilist.rs` in m-apps reads and writes it this way, and `tests/wifi_list_host.rs` shows what's kept.
 
 ## Keep in mind
 

@@ -1,0 +1,8 @@
+# WiFi networks for the apps on this card. Put your own network's name after
+# ssid= and its password after password=, or add networks with the WiFi app.
+# use= is the one to join. An open network has nothing after password=.
+# The format: https://github.com/jvitkauskas/m-apps/blob/main/docs/WIFI-TXT.md
+use=My network
+
+ssid=My network
+password=my password here

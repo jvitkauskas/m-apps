@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
-"""Run apps/picker's FAT and loader code on the computer, on generated card images, good and malformed."""
-import os
+"""Run apps/picker's FAT and loader code on the computer (tests/fat_host.rs), on generated card images, good and
+malformed."""
 from pathlib import Path
 import struct
 import subprocess
@@ -9,6 +9,8 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'m-bootloader/tools'))
 from bankcb import crc16
+sys.path.insert(0, str(ROOT/'tests'))
+from host import build as host_build  # noqa: E402
 
 SECTOR, ENTRY = 512, 32
 RESERVED, FAT_SECTORS, FATS = 32, 64, 2
@@ -22,7 +24,7 @@ def app(code, board=2, fmt=1):
 
 
 def kit_app(body=b'b'*200, entry=0x01c30070, magic=b'MAPP'):
-    """An app as the kit builds it: the entry's jump, the header (kit/app_launch.h), then the rest."""
+    """An app as the kit builds it: the entry's jump, the header (kit/start.S), then the rest."""
     return app(b'\xc0\xea\x3c\x00'+magic+bytes([1, 0, 0, 0])+struct.pack('<I', entry)+body)
 
 
@@ -125,12 +127,7 @@ def standard(**args):
 
 with tempfile.TemporaryDirectory() as folder:
     folder = Path(folder)
-    host = folder/'host'
-    subprocess.run([os.environ.get('HOSTCC', 'cc'), '-std=c11', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
-                    f'-I{ROOT}/apps/picker', f'-I{ROOT}/kit', '-idirafter', f'{ROOT}/m-bootloader/include', '-DPLATFORM_SIM',
-                    ROOT/'tests/fat_host.c', ROOT/'kit/fat.c', ROOT/'kit/load.c', ROOT/'apps/picker/catalog.c',
-                    ROOT/'m-bootloader/src/core.c',
-                    '-o', host], check=True)
+    host = host_build('fat_host')
 
     def run(image, name='-', board=2, fail='-'):
         (folder/'card').write_bytes(image)
@@ -275,7 +272,7 @@ with tempfile.TemporaryDirectory() as folder:
     assert run(image, 'BAD', fail=data_at+clusters[2]-2)[-1] == 'load CARD READ ERROR'
     assert run(image, fail=0)[0].startswith('list CARD READ ERROR')
     assert run(image, 'BAD', fail=RESERVED)[-1] == 'load CARD READ ERROR'
-    # The launcher's list (apps/picker/catalog.c): a folder each, with BOOT.APP, by the name shown.
+    # The launcher's list (apps/picker/catalog.rs): a folder each, with BOOT.APP, by the name shown.
     def catalog(image):
         lines = run(image, '@catalog')
         return lines[0], [line[4:].split('|') for line in lines[1:] if line.startswith('app ')]
